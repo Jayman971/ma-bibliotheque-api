@@ -1,7 +1,7 @@
 // script.js
 
 // --- Configuration de l'API ---
-const API_BASE_URL = 'http://127.0.0.1:8081/api/v1'; // Assurez-vous que c'est le bon port !
+const API_BASE_URL = 'https://ma-bibliotheque-api.onrender.com/api/v1';
 const API_KEY_STORAGE_KEY = 'library_api_key'; // Clé pour stocker l'API Key dans localStorage
 
 let currentApiKey = localStorage.getItem(API_KEY_STORAGE_KEY); // Tente de récupérer la clé au démarrage
