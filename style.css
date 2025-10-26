@@ -1,0 +1,518 @@
+:root {
+    --color-primary: #2649B2; /* Bleu foncé L'Oréal */
+    --color-secondary: #4A74F3; /* Bleu moyen */
+    --color-tertiary: #8E7DE3; /* Violet clair */
+    --color-accent-dark: #9D5CE6; /* Violet plus intense */
+    --color-accent-light: #B55CE6; /* Violet encore plus clair */
+    --color-background-light: #D4D9F0; /* Bleu très clair */
+    --color-text-dark: #333;
+    --color-text-light: #f8f8f8;
+    --color-success: #28a745;
+    --color-danger: #dc3545;
+    --color-info: #17a2b8;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: var(--color-background-light);
+    color: var(--color-text-dark);
+    line-height: 1.6;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+header {
+    background-image: linear-gradient(to right, var(--color-primary), var(--color-secondary));
+    color: var(--color-text-light);
+    padding: 1.5em 0;
+    text-align: center;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+}
+
+.app-title {
+    margin: 0;
+    font-size: 2.5em;
+    letter-spacing: 1px;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+}
+
+nav {
+    margin-top: 20px;
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+nav button {
+    background-color: var(--color-accent-dark);
+    color: var(--color-text-light);
+    border: none;
+    padding: 12px 25px;
+    border-radius: 25px; /* Forme de pilule */
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 1.05em;
+    font-weight: bold;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    text-transform: uppercase;
+}
+
+nav button:hover {
+    background-color: var(--color-accent-light);
+    transform: translateY(-3px) scale(1.02);
+    box-shadow: 0 6px 12px rgba(0,0,0,0.3);
+}
+
+nav button.active {
+    background-color: var(--color-primary);
+    box-shadow: inset 0 2px 8px rgba(0,0,0,0.4);
+    transform: scale(0.98);
+}
+
+main#app-container {
+    flex-grow: 1; /* Prend l'espace restant */
+    padding: 30px;
+    max-width: 1400px;
+    margin: 30px auto;
+    background-color: white;
+    border-radius: 15px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+    animation: fadeIn 0.8s ease-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+h2 {
+    color: var(--color-primary);
+    border-bottom: 3px solid var(--color-background-light);
+    padding-bottom: 12px;
+    margin-top: 0;
+    font-size: 2em;
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+/* Page de connexion */
+.login-container {
+    max-width: 450px;
+    margin: 80px auto;
+    padding: 50px;
+    background-color: #fcfcfc;
+    border-radius: 15px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+    text-align: center;
+    border: 1px solid var(--color-background-light);
+}
+
+.login-container h2 {
+    color: var(--color-secondary);
+    margin-bottom: 40px;
+    border-bottom: none;
+    font-size: 2.2em;
+}
+
+.login-container form div {
+    margin-bottom: 25px;
+    text-align: left;
+}
+
+.login-container label {
+    display: block;
+    margin-bottom: 10px;
+    font-weight: bold;
+    color: #555;
+    font-size: 1.1em;
+}
+
+.login-container input[type="text"],
+.login-container input[type="password"] {
+    width: calc(100% - 24px); /* Ajustement pour padding */
+    padding: 14px 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 1.05em;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.login-container input[type="text"]:focus,
+.login-container input[type="password"]:focus {
+    border-color: var(--color-secondary);
+    box-shadow: 0 0 0 3px rgba(var(--color-secondary), 0.2);
+    outline: none;
+}
+
+.login-container button[type="submit"] {
+    width: 100%;
+    padding: 15px;
+    background-color: var(--color-secondary);
+    color: var(--color-text-light);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1.2em;
+    font-weight: bold;
+    transition: background-color 0.3s ease, transform 0.2s ease;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+}
+
+.login-container button[type="submit"]:hover {
+    background-color: var(--color-primary);
+    transform: translateY(-2px);
+}
+
+/* Section de filtres et tri */
+.filter-sort-section {
+    background-color: #f8fbfd;
+    padding: 25px;
+    border-radius: 12px;
+    margin-bottom: 30px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    align-items: flex-end;
+    box-shadow: inset 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.filter-sort-section div {
+    flex: 1;
+    min-width: 180px;
+}
+
+.filter-sort-section label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: bold;
+    color: #555;
+    font-size: 0.95em;
+}
+
+.filter-sort-section input[type="text"],
+.filter-sort-section select {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    font-size: 0.95em;
+    box-sizing: border-box;
+    background-color: white;
+    transition: border-color 0.3s ease;
+}
+
+.filter-sort-section input[type="text"]:focus,
+.filter-sort-section select:focus {
+    border-color: var(--color-tertiary);
+    outline: none;
+}
+
+.filter-sort-section button {
+    background-color: var(--color-accent-dark);
+    color: var(--color-text-light);
+    border: none;
+    padding: 12px 25px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1em;
+    font-weight: bold;
+    transition: background-color 0.3s ease, transform 0.2s ease;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.15);
+}
+
+.filter-sort-section button:hover {
+    background-color: var(--color-accent-light);
+    transform: translateY(-2px);
+}
+
+/* Tableau des livres */
+.book-table-container {
+    overflow-x: auto; /* Pour les petits écrans */
+    margin-top: 25px;
+    box-shadow: 0 5px 20px rgba(0,0,0,0.08);
+    border-radius: 12px;
+    border: 1px solid #e0e0e0;
+}
+
+.book-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 700px; /* Assure que le tableau ne devient pas trop petit */
+}
+
+.book-table th, .book-table td {
+    padding: 15px;
+    text-align: left;
+    border-bottom: 1px solid #eee;
+}
+
+.book-table th {
+    background-color: var(--color-primary);
+    color: var(--color-text-light);
+    font-weight: bold;
+    position: sticky;
+    top: 0; /* Garde l'entête visible lors du scroll */
+    z-index: 999;
+}
+
+.book-table th.sortable {
+    cursor: pointer;
+    position: relative;
+}
+
+.book-table th.sortable:hover {
+    background-color: var(--color-secondary);
+}
+
+.book-table th.sortable .sort-icon {
+    margin-left: 8px;
+    font-size: 0.8em;
+    opacity: 0.6;
+}
+
+.book-table th.sortable.asc .sort-icon::after { content: " ▲"; }
+.book-table th.sortable.desc .sort-icon::after { content: " ▼"; }
+
+
+.book-table tbody tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+.book-table tbody tr:hover {
+    background-color: #f0f8ff;
+}
+
+.book-table td {
+    color: #555;
+}
+
+.book-table .actions-cell {
+    white-space: nowrap; /* Empêche les boutons de passer à la ligne */
+}
+
+.book-table .actions-cell button {
+    background-color: var(--color-background-light);
+    color: var(--color-primary);
+    border: 1px solid var(--color-background-light);
+    padding: 8px 12px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.85em;
+    margin-right: 5px;
+    transition: all 0.2s ease;
+}
+
+.book-table .actions-cell button:hover {
+    background-color: var(--color-tertiary);
+    color: var(--color-text-light);
+    border-color: var(--color-tertiary);
+}
+
+.book-table .actions-cell .delete-btn {
+    background-color: var(--color-danger);
+    color: var(--color-text-light);
+    border-color: var(--color-danger);
+}
+
+.book-table .actions-cell .delete-btn:hover {
+    background-color: #c82333;
+    border-color: #bd2130;
+}
+
+
+/* Formulaires d'ajout/édition */
+.book-form-container {
+    max-width: 650px;
+    margin: 30px auto;
+    padding: 35px;
+    background-color: #f8fbfd;
+    border-radius: 15px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+    border: 1px solid #e0e0e0;
+}
+
+.book-form-container h2 {
+    color: var(--color-secondary);
+    margin-bottom: 30px;
+    border-bottom: 1px solid var(--color-background-light);
+    padding-bottom: 15px;
+}
+
+.book-form-container label {
+    display: block;
+    margin-bottom: 10px;
+    font-weight: bold;
+    color: #555;
+    font-size: 1.05em;
+}
+
+.book-form-container input[type="text"],
+.book-form-container input[type="number"],
+.book-form-container select {
+    width: calc(100% - 24px); /* Ajustement pour padding */
+    padding: 12px;
+    margin-bottom: 20px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    font-size: 1em;
+    background-color: white;
+}
+
+.book-form-container input[type="checkbox"] {
+    margin-right: 12px;
+    transform: scale(1.3); /* Agrandir la checkbox */
+}
+
+.book-form-container button[type="submit"] {
+    background-color: var(--color-secondary);
+    color: var(--color-text-light);
+    border: none;
+    padding: 15px 30px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1.2em;
+    font-weight: bold;
+    transition: background-color 0.3s ease, transform 0.2s ease;
+    margin-top: 25px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+}
+
+.book-form-container button[type="submit"]:hover {
+    background-color: var(--color-primary);
+    transform: translateY(-2px);
+}
+
+/* Accueil */
+.homepage {
+    text-align: center;
+    padding: 50px 20px;
+}
+
+.homepage h2 {
+    font-size: 3em;
+    color: var(--color-primary);
+    margin-bottom: 20px;
+    border-bottom: none;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+}
+
+.homepage p.tagline {
+    font-size: 1.4em;
+    color: #666;
+    max-width: 900px;
+    margin: 0 auto 50px;
+    font-style: italic;
+}
+
+.homepage .welcome-stats {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    margin-top: 50px;
+    flex-wrap: wrap;
+}
+
+.homepage .stat-card {
+    background-color: var(--color-tertiary); /* Couleur plus vive */
+    color: var(--color-text-light);
+    padding: 30px 40px;
+    border-radius: 15px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+    min-width: 250px;
+    flex: 1;
+    max-width: 300px;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.homepage .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: radial-gradient(circle at top left, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 70%);
+    z-index: 1;
+}
+
+.homepage .stat-card:hover {
+    transform: translateY(-10px) scale(1.03);
+    box-shadow: 0 12px 30px rgba(0,0,0,0.3);
+}
+
+.homepage .stat-card .icon {
+    font-size: 3.5em;
+    margin-bottom: 15px;
+    color: rgba(255,255,255,0.8);
+    position: relative;
+    z-index: 2;
+}
+
+.homepage .stat-card h4 {
+    font-size: 1.6em;
+    margin-top: 0;
+    margin-bottom: 10px;
+    position: relative;
+    z-index: 2;
+}
+
+.homepage .stat-card p {
+    font-size: 2.5em;
+    font-weight: bold;
+    margin: 0;
+    position: relative;
+    z-index: 2;
+}
+
+.homepage .stat-card:nth-child(even) { /* Pour alterner les couleurs */
+    background-color: var(--color-accent-dark);
+}
+
+/* Messages d'alerte */
+.alert-message {
+    padding: 15px;
+    margin-bottom: 25px;
+    border-radius: 10px;
+    font-weight: bold;
+    text-align: center;
+    opacity: 0;
+    transition: opacity 0.5s ease-in-out;
+    position: relative;
+    z-index: 1001; /* Au-dessus de tout */
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.alert-message.success {
+    background-color: #d4edda;
+    color: var(--color-success);
+    border: 1px solid #c3e6cb;
+}
+
+.alert-message.error {
+    background-color: #f8d7da;
+    color: var(--color-danger);
+    border: 1px solid #f5c6cb;
+}
+.alert-message.info {
+    background-color: #d1ecf1;
+    color: var(--color-info);
+    border: 1px solid #bee5eb;
+}
+
+.alert-message.visible {
+    opacity: 1;
+}
