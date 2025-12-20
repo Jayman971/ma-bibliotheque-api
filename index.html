@@ -3,24 +3,109 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ma Bibliothèque - Web App</title>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    
+    <!-- SEO & Description -->
+    <title>Ma Bibliothèque - Gestion de Collection de Livres</title>
+    <meta name="description" content="Gérez votre collection de livres, organisez votre wishlist et suivez vos lectures avec Ma Bibliothèque">
+    <meta name="keywords" content="bibliothèque, livres, collection, wishlist, lecture, gestion">
+    <meta name="author" content="Ma Bibliothèque">
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Ma Bibliothèque - Gestion de Collection">
+    <meta property="og:description" content="Organisez vos livres et gérez votre wishlist">
+    <meta property="og:image" content="/icon-512.png">
+    
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="Ma Bibliothèque">
+    <meta name="twitter:description" content="Gérez votre collection de livres">
+    
+    <!-- Theme Color -->
+    <meta name="theme-color" content="#2649B2">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="#2649B2">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    
+    <!-- Styles -->
     <link rel="stylesheet" href="style.css">
+    
     <!-- Font Awesome pour les icônes -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" 
+          integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA==" 
+          crossorigin="anonymous" referrerpolicy="no-referrer">
+    
+    <!-- Preconnect pour optimiser les performances -->
+    <link rel="preconnect" href="https://ma-bibliotheque-api.onrender.com">
+    <link rel="dns-prefetch" href="https://ma-bibliotheque-api.onrender.com">
 </head>
 <body>
+    <!-- Header avec navigation -->
     <header>
-        <h1 class="app-title">Ma Bibliothèque</h1>
-        <nav id="mainNav">
+        <h1 class="app-title">
+            <i class="fas fa-book-open"></i> Ma Bibliothèque
+        </h1>
+        <nav id="mainNav" role="navigation" aria-label="Navigation principale">
             <!-- Les boutons de navigation seront injectés ici par JavaScript après connexion -->
         </nav>
     </header>
 
-    <main id="app-container">
+    <!-- Contenu principal -->
+    <main id="app-container" role="main">
         <!-- Le contenu de l'application sera injecté ici par JavaScript -->
-        <p>Chargement de l'application...</p>
+        <div class="initial-loader">
+            <div class="spinner"></div>
+            <p>Chargement de l'application...</p>
+        </div>
     </main>
 
+    <!-- Footer -->
+    <footer>
+        <p>
+            <i class="fas fa-heart" style="color: #e74c3c;"></i> 
+            Ma Bibliothèque © 2024 
+            <span class="separator">•</span>
+            <a href="https://ma-bibliotheque-api.onrender.com/api/v1/health" target="_blank" rel="noopener" id="apiStatusLink">
+                <i class="fas fa-circle" id="apiStatusIcon" style="color: #28a745;"></i> 
+                API Status
+            </a>
+        </p>
+    </footer>
+
+    <!-- Scripts -->
     <script src="script.js"></script>
+    
+    <!-- Script pour vérifier le statut de l'API -->
+    <script>
+        // Vérification périodique du statut de l'API
+        async function checkApiStatus() {
+            try {
+                const response = await fetch('https://ma-bibliotheque-api.onrender.com/api/v1/health');
+                const data = await response.json();
+                const icon = document.getElementById('apiStatusIcon');
+                
+                if (data.status === 'healthy' && data.database === 'connected') {
+                    icon.style.color = '#28a745'; // Vert
+                    icon.title = 'API opérationnelle';
+                } else {
+                    icon.style.color = '#ffc107'; // Orange
+                    icon.title = 'API partiellement disponible';
+                }
+            } catch (error) {
+                const icon = document.getElementById('apiStatusIcon');
+                icon.style.color = '#dc3545'; // Rouge
+                icon.title = 'API indisponible';
+            }
+        }
+        
+        // Vérifier au chargement et toutes les 60 secondes
+        checkApiStatus();
+        setInterval(checkApiStatus, 60000);
+    </script>
 </body>
 </html>
