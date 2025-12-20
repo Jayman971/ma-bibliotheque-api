@@ -1,9 +1,9 @@
-# api_biblio.py - Version PostgreSQL pour déploiement sur Render.com
+# api_biblio.py - Version OPTIMISÉE pour déploiement sur Render.com avec PostgreSQL
 
 from flask import Flask, request, jsonify
 from functools import wraps
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import psycopg
+from psycopg.rows import dict_row
 import os
 from flask_cors import CORS
 from datetime import datetime, timedelta
@@ -19,6 +19,9 @@ CORS(app)
 # --- Configuration de la base de données PostgreSQL ---
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
+if not DATABASE_URL:
+    raise ValueError("La variable d'environnement DATABASE_URL doit être définie pour se connecter à PostgreSQL")
+
 # --- Configuration des identifiants ---
 API_KEYS = {
     os.getenv('RENDER_API_KEY_ADMIN', 'mon_api_key_secrete_pour_admin_local'): 'admin',
@@ -30,6 +33,7 @@ USERS_PASSWORDS = {
 }
 
 # ✅ Cache simple en mémoire (pour Render gratuit)
+# Pour une vraie production, utilisez Redis
 cache_store = {}
 CACHE_DURATION = 30  # secondes
 
@@ -89,67 +93,55 @@ def api_login():
     else:
         return jsonify({'message': 'Invalid credentials'}), 401
 
-# ====== BASE DE DONNÉES UTILITIES (PostgreSQL) ======
+# ====== BASE DE DONNÉES UTILITIES ======
 
 def get_db_connection():
-    """Connexion à PostgreSQL avec RealDictCursor pour obtenir des dictionnaires"""
-    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    """Établit une connexion à PostgreSQL avec psycopg3"""
+    conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
     return conn
 
 def create_table():
-    """Création de la table avec PostgreSQL"""
+    """Crée la table et les index si ils n'existent pas"""
     conn = get_db_connection()
-    cur = conn.cursor()
-    
-    # Création de la table (SERIAL = AUTO_INCREMENT en PostgreSQL)
-    cur.execute('''
-        CREATE TABLE IF NOT EXISTS livres (
-            id SERIAL PRIMARY KEY,
-            titre TEXT NOT NULL,
-            auteur TEXT NOT NULL,
-            note INTEGER CHECK(note >= 0 AND note <= 5),
-            proprietaire TEXT NOT NULL DEFAULT 'J',
-            statut_lecture TEXT DEFAULT 'lu',
-            est_wishlist INTEGER DEFAULT 0
-        )
-    ''')
-    
-    # ✅ Création d'index pour améliorer les performances
-    cur.execute('CREATE INDEX IF NOT EXISTS idx_est_wishlist ON livres(est_wishlist)')
-    cur.execute('CREATE INDEX IF NOT EXISTS idx_proprietaire ON livres(proprietaire)')
-    cur.execute('CREATE INDEX IF NOT EXISTS idx_statut_lecture ON livres(statut_lecture)')
-    cur.execute('CREATE INDEX IF NOT EXISTS idx_titre ON livres(titre)')
-    cur.execute('CREATE INDEX IF NOT EXISTS idx_auteur ON livres(auteur)')
-    
-    conn.commit()
-    cur.close()
+    with conn.cursor() as cur:
+        # ✅ Création de la table avec SERIAL pour l'auto-increment (PostgreSQL)
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS livres (
+                id SERIAL PRIMARY KEY,
+                titre TEXT NOT NULL,
+                auteur TEXT NOT NULL,
+                note INTEGER CHECK(note >= 0 AND note <= 5),
+                proprietaire TEXT NOT NULL DEFAULT 'J',
+                statut_lecture TEXT DEFAULT 'lu',
+                est_wishlist INTEGER DEFAULT 0
+            )
+        ''')
+        
+        # ✅ Création d'index pour améliorer les performances
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_est_wishlist ON livres(est_wishlist)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_proprietaire ON livres(proprietaire)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_statut_lecture ON livres(statut_lecture)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_titre ON livres(titre)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_auteur ON livres(auteur)')
+        
+        conn.commit()
     conn.close()
 
-# ✅ Initialisation de la table au démarrage
 create_table()
-
-def row_to_dict(row):
-    """Convertit un objet row en dictionnaire (déjà fait par RealDictCursor)"""
-    return dict(row)
 
 def get_book_by_id_helper(book_id, is_wishlist=None):
     """
     Récupère un livre spécifique par ID.
     """
     conn = get_db_connection()
-    cur = conn.cursor()
-    
-    query = 'SELECT * FROM livres WHERE id = %s'
-    params = [book_id]
-    
-    if is_wishlist is not None:
-        query += ' AND est_wishlist = %s'
-        params.append(1 if is_wishlist else 0)
-    
-    cur.execute(query, params)
-    book = cur.fetchone()
-    
-    cur.close()
+    with conn.cursor() as cur:
+        query = 'SELECT * FROM livres WHERE id = %s'
+        params = [book_id]
+        if is_wishlist is not None:
+            query += ' AND est_wishlist = %s'
+            params.append(1 if is_wishlist else 0)
+        cur.execute(query, params)
+        book = cur.fetchone()
     conn.close()
     return book if book else None
 
@@ -168,40 +160,39 @@ def get_stats():
         return jsonify(cached_data), 200
     
     conn = get_db_connection()
-    cur = conn.cursor()
     
-    # ✅ Une seule requête optimisée pour les stats de la collection
-    cur.execute('''
-        SELECT 
-            COUNT(*) as total,
-            COUNT(CASE WHEN proprietaire = 'J' THEN 1 END) as mes_livres,
-            COUNT(CASE WHEN proprietaire = 'K' THEN 1 END) as livres_k,
-            COUNT(CASE WHEN statut_lecture = 'a_lire' THEN 1 END) as a_lire,
-            COUNT(CASE WHEN statut_lecture = 'en_cours' THEN 1 END) as en_cours,
-            COUNT(CASE WHEN statut_lecture = 'lu' THEN 1 END) as lus,
-            ROUND(AVG(CASE WHEN note > 0 THEN note END), 1) as note_moyenne
-        FROM livres
-        WHERE est_wishlist = 0
-    ''')
-    stats_collection = cur.fetchone()
+    with conn.cursor() as cur:
+        # ✅ Une seule requête optimisée pour les stats de la collection
+        cur.execute('''
+            SELECT 
+                COUNT(*) as total,
+                COUNT(CASE WHEN proprietaire = 'J' THEN 1 END) as mes_livres,
+                COUNT(CASE WHEN proprietaire = 'K' THEN 1 END) as livres_k,
+                COUNT(CASE WHEN statut_lecture = 'a_lire' THEN 1 END) as a_lire,
+                COUNT(CASE WHEN statut_lecture = 'en_cours' THEN 1 END) as en_cours,
+                COUNT(CASE WHEN statut_lecture = 'lu' THEN 1 END) as lus,
+                ROUND(AVG(CASE WHEN note > 0 THEN note END), 1) as note_moyenne
+            FROM livres
+            WHERE est_wishlist = 0
+        ''')
+        stats_collection = cur.fetchone()
+        
+        # ✅ Une seule requête optimisée pour les stats de la wishlist
+        cur.execute('''
+            SELECT 
+                COUNT(*) as total,
+                COUNT(CASE WHEN proprietaire = 'J' THEN 1 END) as mes_souhaits,
+                COUNT(CASE WHEN proprietaire = 'K' THEN 1 END) as souhaits_k
+            FROM livres
+            WHERE est_wishlist = 1
+        ''')
+        stats_wishlist = cur.fetchone()
     
-    # ✅ Une seule requête optimisée pour les stats de la wishlist
-    cur.execute('''
-        SELECT 
-            COUNT(*) as total,
-            COUNT(CASE WHEN proprietaire = 'J' THEN 1 END) as mes_souhaits,
-            COUNT(CASE WHEN proprietaire = 'K' THEN 1 END) as souhaits_k
-        FROM livres
-        WHERE est_wishlist = 1
-    ''')
-    stats_wishlist = cur.fetchone()
-    
-    cur.close()
     conn.close()
     
     result = {
-        'collection': row_to_dict(stats_collection),
-        'wishlist': row_to_dict(stats_wishlist)
+        'collection': stats_collection,
+        'wishlist': stats_wishlist
     }
     
     # Mettre en cache
@@ -242,56 +233,53 @@ def get_books():
         return jsonify(cached_data), 200
     
     conn = get_db_connection()
-    cur = conn.cursor()
     
-    # ✅ Requête optimisée avec tri côté serveur
-    sql_query = 'SELECT id, titre, auteur, note, proprietaire, statut_lecture, est_wishlist FROM livres WHERE est_wishlist = 0'
-    params = []
+    with conn.cursor() as cur:
+        # ✅ Requête optimisée avec tri côté serveur
+        sql_query = 'SELECT id, titre, auteur, note, proprietaire, statut_lecture, est_wishlist FROM livres WHERE est_wishlist = 0'
+        params = []
 
-    if search_query:
-        if search_by == 'titre':
-            sql_query += ' AND titre ILIKE %s'
-        elif search_by == 'auteur':
-            sql_query += ' AND auteur ILIKE %s'
-        params.append(f'%{search_query}%')
+        if search_query:
+            if search_by == 'titre':
+                sql_query += ' AND titre ILIKE %s'
+            elif search_by == 'auteur':
+                sql_query += ' AND auteur ILIKE %s'
+            params.append(f'%{search_query}%')
+        
+        if proprietaire_filter:
+            sql_query += ' AND proprietaire = %s'
+            params.append(proprietaire_filter)
+        
+        if statut_filter:
+            sql_query += ' AND statut_lecture = %s'
+            params.append(statut_filter)
+        
+        # ✅ Tri côté serveur
+        sql_query += f' ORDER BY {sort_by} {sort_dir}'
+        
+        # ✅ Pagination
+        if per_page < 1000:  # Seulement si pagination activée
+            offset = (page - 1) * per_page
+            sql_query += f' LIMIT {per_page} OFFSET {offset}'
+        
+        cur.execute(sql_query, params)
+        livres = cur.fetchall()
+        
+        # Stats (déjà optimisées)
+        cur.execute('''
+            SELECT 
+                COUNT(*) as total,
+                COUNT(CASE WHEN proprietaire = 'J' THEN 1 END) as mes_livres,
+                COUNT(CASE WHEN proprietaire = 'K' THEN 1 END) as livres_k,
+                COUNT(CASE WHEN statut_lecture = 'a_lire' THEN 1 END) as a_lire,
+                COUNT(CASE WHEN statut_lecture = 'en_cours' THEN 1 END) as en_cours,
+                COUNT(CASE WHEN statut_lecture = 'lu' THEN 1 END) as lus,
+                ROUND(AVG(CASE WHEN note > 0 THEN note END), 1) as note_moyenne
+            FROM livres
+            WHERE est_wishlist = 0
+        ''')
+        stats = cur.fetchone() or {}
     
-    if proprietaire_filter:
-        sql_query += ' AND proprietaire = %s'
-        params.append(proprietaire_filter)
-    
-    if statut_filter:
-        sql_query += ' AND statut_lecture = %s'
-        params.append(statut_filter)
-    
-    # ✅ Tri côté serveur
-    sql_query += f' ORDER BY {sort_by} {sort_dir}'
-    
-    # ✅ Pagination
-    if per_page < 1000:  # Seulement si pagination activée
-        offset = (page - 1) * per_page
-        sql_query += f' LIMIT {per_page} OFFSET {offset}'
-    
-    cur.execute(sql_query, params)
-    livres_db = cur.fetchall()
-    livres = [row_to_dict(row) for row in livres_db]
-    
-    # Stats
-    cur.execute('''
-        SELECT 
-            COUNT(*) as total,
-            COUNT(CASE WHEN proprietaire = 'J' THEN 1 END) as mes_livres,
-            COUNT(CASE WHEN proprietaire = 'K' THEN 1 END) as livres_k,
-            COUNT(CASE WHEN statut_lecture = 'a_lire' THEN 1 END) as a_lire,
-            COUNT(CASE WHEN statut_lecture = 'en_cours' THEN 1 END) as en_cours,
-            COUNT(CASE WHEN statut_lecture = 'lu' THEN 1 END) as lus,
-            ROUND(AVG(CASE WHEN note > 0 THEN note END), 1) as note_moyenne
-        FROM livres
-        WHERE est_wishlist = 0
-    ''')
-    stats_db = cur.fetchone()
-    stats = row_to_dict(stats_db) if stats_db else {}
-    
-    cur.close()
     conn.close()
     
     result = {
@@ -315,9 +303,8 @@ def get_book_by_id(book_id):
     
     book = get_book_by_id_helper(book_id, is_wishlist=False)
     if book:
-        result = row_to_dict(book)
-        set_in_cache(cache_key, result)
-        return jsonify(result), 200
+        set_in_cache(cache_key, book)
+        return jsonify(book), 200
     else:
         return jsonify({'message': 'Livre non trouvé dans la collection'}), 404
 
@@ -337,17 +324,14 @@ def add_book():
         return jsonify({'message': 'Le titre et l\'auteur sont obligatoires'}), 400
 
     conn = get_db_connection()
-    cur = conn.cursor()
-    
     try:
-        cur.execute('''
-            INSERT INTO livres (titre, auteur, note, proprietaire, statut_lecture, est_wishlist) 
-            VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
-        ''', (titre, auteur, note, proprietaire, statut_lecture, est_wishlist))
-        
-        new_book_id = cur.fetchone()['id']
-        conn.commit()
-        cur.close()
+        with conn.cursor() as cur:
+            cur.execute(
+                'INSERT INTO livres (titre, auteur, note, proprietaire, statut_lecture, est_wishlist) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id',
+                (titre, auteur, note, proprietaire, statut_lecture, est_wishlist)
+            )
+            new_book_id = cur.fetchone()['id']
+            conn.commit()
         conn.close()
         
         # ✅ IMPORTANT : Vider le cache après modification
@@ -356,7 +340,6 @@ def add_book():
         return jsonify({'message': 'Livre ajouté à la collection avec succès !', 'id': new_book_id}), 201
     except Exception as e:
         conn.rollback()
-        cur.close()
         conn.close()
         return jsonify({'message': f'Erreur lors de l\'ajout du livre: {str(e)}'}), 500
 
@@ -379,17 +362,13 @@ def update_book(book_id):
         return jsonify({'message': 'Le titre et l\'auteur sont obligatoires'}), 400
 
     conn = get_db_connection()
-    cur = conn.cursor()
-    
     try:
-        cur.execute('''
-            UPDATE livres 
-            SET titre = %s, auteur = %s, note = %s, proprietaire = %s, statut_lecture = %s 
-            WHERE id = %s AND est_wishlist = 0
-        ''', (titre, auteur, note, proprietaire, statut_lecture, book_id))
-        
-        conn.commit()
-        cur.close()
+        with conn.cursor() as cur:
+            cur.execute(
+                'UPDATE livres SET titre = %s, auteur = %s, note = %s, proprietaire = %s, statut_lecture = %s WHERE id = %s AND est_wishlist = 0',
+                (titre, auteur, note, proprietaire, statut_lecture, book_id)
+            )
+            conn.commit()
         conn.close()
         
         # ✅ IMPORTANT : Vider le cache après modification
@@ -398,7 +377,6 @@ def update_book(book_id):
         return jsonify({'message': f'Le livre ID {book_id} a été mis à jour dans la collection !'}), 200
     except Exception as e:
         conn.rollback()
-        cur.close()
         conn.close()
         return jsonify({'message': f'Erreur lors de la mise à jour du livre: {str(e)}'}), 500
 
@@ -409,12 +387,10 @@ def delete_book(book_id):
     
     if book_db:
         conn = get_db_connection()
-        cur = conn.cursor()
-        
         try:
-            cur.execute('DELETE FROM livres WHERE id = %s AND est_wishlist = 0', (book_id,))
-            conn.commit()
-            cur.close()
+            with conn.cursor() as cur:
+                cur.execute('DELETE FROM livres WHERE id = %s AND est_wishlist = 0', (book_id,))
+                conn.commit()
             conn.close()
             
             # ✅ IMPORTANT : Vider le cache après modification
@@ -423,7 +399,6 @@ def delete_book(book_id):
             return jsonify({'message': f'Le livre "{book_db["titre"]}" a été supprimé de la collection.'}), 200
         except Exception as e:
             conn.rollback()
-            cur.close()
             conn.close()
             return jsonify({'message': f'Erreur lors de la suppression du livre: {str(e)}'}), 500
     else:
@@ -455,37 +430,34 @@ def get_wishlist():
         return jsonify(cached_data), 200
     
     conn = get_db_connection()
-    cur = conn.cursor()
     
-    sql_query = 'SELECT id, titre, auteur, proprietaire FROM livres WHERE est_wishlist = 1'
-    params = []
+    with conn.cursor() as cur:
+        sql_query = 'SELECT id, titre, auteur, proprietaire FROM livres WHERE est_wishlist = 1'
+        params = []
+        
+        if search_query:
+            if search_by == 'titre':
+                sql_query += ' AND titre ILIKE %s'
+            elif search_by == 'auteur':
+                sql_query += ' AND auteur ILIKE %s'
+            params.append(f'%{search_query}%')
+        
+        # ✅ Tri côté serveur
+        sql_query += f' ORDER BY {sort_by} {sort_dir}'
+        
+        cur.execute(sql_query, params)
+        wishlist_livres = cur.fetchall()
+        
+        cur.execute('''
+            SELECT 
+                COUNT(*) as total,
+                COUNT(CASE WHEN proprietaire = 'J' THEN 1 END) as mes_souhaits,
+                COUNT(CASE WHEN proprietaire = 'K' THEN 1 END) as souhaits_k
+            FROM livres
+            WHERE est_wishlist = 1
+        ''')
+        stats_wishlist = cur.fetchone() or {}
     
-    if search_query:
-        if search_by == 'titre':
-            sql_query += ' AND titre ILIKE %s'
-        elif search_by == 'auteur':
-            sql_query += ' AND auteur ILIKE %s'
-        params.append(f'%{search_query}%')
-    
-    # ✅ Tri côté serveur
-    sql_query += f' ORDER BY {sort_by} {sort_dir}'
-    
-    cur.execute(sql_query, params)
-    wishlist_livres_db = cur.fetchall()
-    wishlist_livres = [row_to_dict(row) for row in wishlist_livres_db]
-    
-    cur.execute('''
-        SELECT 
-            COUNT(*) as total,
-            COUNT(CASE WHEN proprietaire = 'J' THEN 1 END) as mes_souhaits,
-            COUNT(CASE WHEN proprietaire = 'K' THEN 1 END) as souhaits_k
-        FROM livres
-        WHERE est_wishlist = 1
-    ''')
-    stats_wishlist_db = cur.fetchone()
-    stats_wishlist = row_to_dict(stats_wishlist_db) if stats_wishlist_db else {}
-    
-    cur.close()
     conn.close()
     
     result = {
@@ -509,9 +481,8 @@ def get_wishlist_book_by_id(book_id):
     
     book = get_book_by_id_helper(book_id, is_wishlist=True)
     if book:
-        result = row_to_dict(book)
-        set_in_cache(cache_key, result)
-        return jsonify(result), 200
+        set_in_cache(cache_key, book)
+        return jsonify(book), 200
     else:
         return jsonify({'message': 'Livre non trouvé dans la wishlist'}), 404
 
@@ -529,17 +500,14 @@ def add_to_wishlist():
         return jsonify({'message': 'Le titre et l\'auteur sont obligatoires'}), 400
 
     conn = get_db_connection()
-    cur = conn.cursor()
-    
     try:
-        cur.execute('''
-            INSERT INTO livres (titre, auteur, proprietaire, est_wishlist) 
-            VALUES (%s, %s, %s, %s) RETURNING id
-        ''', (titre, auteur, proprietaire, est_wishlist))
-        
-        new_book_id = cur.fetchone()['id']
-        conn.commit()
-        cur.close()
+        with conn.cursor() as cur:
+            cur.execute(
+                'INSERT INTO livres (titre, auteur, proprietaire, est_wishlist) VALUES (%s, %s, %s, %s) RETURNING id',
+                (titre, auteur, proprietaire, est_wishlist)
+            )
+            new_book_id = cur.fetchone()['id']
+            conn.commit()
         conn.close()
         
         # ✅ Vider le cache
@@ -548,7 +516,6 @@ def add_to_wishlist():
         return jsonify({'message': 'Livre ajouté à la wishlist avec succès !', 'id': new_book_id}), 201
     except Exception as e:
         conn.rollback()
-        cur.close()
         conn.close()
         return jsonify({'message': f'Erreur lors de l\'ajout à la wishlist: {str(e)}'}), 500
 
@@ -569,17 +536,13 @@ def update_wishlist_book(book_id):
         return jsonify({'message': 'Le titre et l\'auteur sont obligatoires'}), 400
 
     conn = get_db_connection()
-    cur = conn.cursor()
-    
     try:
-        cur.execute('''
-            UPDATE livres 
-            SET titre = %s, auteur = %s, proprietaire = %s 
-            WHERE id = %s AND est_wishlist = 1
-        ''', (titre, auteur, proprietaire, book_id))
-        
-        conn.commit()
-        cur.close()
+        with conn.cursor() as cur:
+            cur.execute(
+                'UPDATE livres SET titre = %s, auteur = %s, proprietaire = %s WHERE id = %s AND est_wishlist = 1',
+                (titre, auteur, proprietaire, book_id)
+            )
+            conn.commit()
         conn.close()
         
         # ✅ Vider le cache
@@ -588,7 +551,6 @@ def update_wishlist_book(book_id):
         return jsonify({'message': f'Le livre ID {book_id} a été mis à jour dans la wishlist !'}), 200
     except Exception as e:
         conn.rollback()
-        cur.close()
         conn.close()
         return jsonify({'message': f'Erreur lors de la mise à jour du livre dans la wishlist: {str(e)}'}), 500
 
@@ -599,12 +561,10 @@ def delete_wishlist_book(book_id):
     
     if book_db:
         conn = get_db_connection()
-        cur = conn.cursor()
-        
         try:
-            cur.execute('DELETE FROM livres WHERE id = %s AND est_wishlist = 1', (book_id,))
-            conn.commit()
-            cur.close()
+            with conn.cursor() as cur:
+                cur.execute('DELETE FROM livres WHERE id = %s AND est_wishlist = 1', (book_id,))
+                conn.commit()
             conn.close()
             
             # ✅ Vider le cache
@@ -613,7 +573,6 @@ def delete_wishlist_book(book_id):
             return jsonify({'message': f'Le livre "{book_db["titre"]}" a été supprimé de la wishlist.'}), 200
         except Exception as e:
             conn.rollback()
-            cur.close()
             conn.close()
             return jsonify({'message': f'Erreur lors de la suppression du livre: {str(e)}'}), 500
     else:
@@ -626,17 +585,13 @@ def move_to_collection(book_id):
     
     if book:
         conn = get_db_connection()
-        cur = conn.cursor()
-        
         try:
-            cur.execute('''
-                UPDATE livres 
-                SET est_wishlist = 0, statut_lecture = %s 
-                WHERE id = %s
-            ''', ('a_lire', book_id))
-            
-            conn.commit()
-            cur.close()
+            with conn.cursor() as cur:
+                cur.execute(
+                    'UPDATE livres SET est_wishlist = 0, statut_lecture = %s WHERE id = %s', 
+                    ('a_lire', book_id)
+                )
+                conn.commit()
             conn.close()
             
             # ✅ Vider le cache
@@ -645,7 +600,6 @@ def move_to_collection(book_id):
             return jsonify({'message': f'Le livre "{book["titre"]}" a été ajouté à votre collection !'}), 200
         except Exception as e:
             conn.rollback()
-            cur.close()
             conn.close()
             return jsonify({'message': f'Erreur lors du déplacement du livre: {str(e)}'}), 500
     else:
@@ -663,11 +617,10 @@ def clear_cache_endpoint():
 def health_check():
     """Endpoint pour vérifier que l'API fonctionne"""
     try:
-        # Tester la connexion à la base de données
+        # Test de connexion à la base de données
         conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('SELECT 1')
-        cur.close()
+        with conn.cursor() as cur:
+            cur.execute('SELECT 1')
         conn.close()
         db_status = 'connected'
     except Exception as e:
@@ -695,4 +648,4 @@ def internal_error(error):
 
 # ====== Point d'entrée pour l'exécution locale ======
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=os.getenv('PORT', '8081'))
+    app.run(debug=True, host='0.0.0.0', port=int(os.getenv('PORT', '8081')))

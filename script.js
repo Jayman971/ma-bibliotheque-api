@@ -1,7 +1,11 @@
 // script.js - VERSION OPTIMISÉE POUR POSTGRESQL
 
 // --- Configuration de l'API ---
-const API_BASE_URL = 'https://ma-bibliotheque-api.onrender.com/api/v1';
+// ✅ Utilise API_CONFIG défini dans index.html, sinon fallback
+const API_BASE_URL = typeof API_CONFIG !== 'undefined' 
+    ? API_CONFIG.BASE_URL 
+    : 'https://VOTRE-NOM-SERVICE.onrender.com/api/v1';
+
 const API_KEY_STORAGE_KEY = 'library_api_key';
 
 let currentApiKey = localStorage.getItem(API_KEY_STORAGE_KEY);
@@ -20,9 +24,12 @@ const mainNav = document.getElementById('mainNav');
 
 // --- Système de cache amélioré ---
 const apiCache = new Map();
-const CACHE_DURATION = 30000; // 30 secondes
+// ✅ PostgreSQL est plus performant, on peut cacher un peu plus longtemps
+const CACHE_DURATION = typeof API_CONFIG !== 'undefined' && API_CONFIG.CACHE_DURATION 
+    ? API_CONFIG.CACHE_DURATION 
+    : 60000; // 60 secondes (1 minute)
 
-// ✅ NOUVEAU : Loader global
+// ✅ Loader global
 let globalLoader = null;
 
 // --- Fonctions utilitaires ---
@@ -43,7 +50,7 @@ function showAlert(message, type = 'success', duration = 3000) {
     }, duration);
 }
 
-// ✅ NOUVEAU : Afficher/masquer le loader global
+// ✅ Afficher/masquer le loader global
 function showLoader(message = 'Chargement...') {
     if (!globalLoader) {
         globalLoader = document.createElement('div');
@@ -110,7 +117,7 @@ async function callApi(endpoint, method = 'GET', data = null, needsAuth = true, 
         options.body = JSON.stringify(data);
     }
 
-    // ✅ Retry logic
+    // ✅ Retry logic avec backoff exponentiel
     for (let attempt = 0; attempt <= retries; attempt++) {
         try {
             console.time(`API ${method} ${endpoint}`);
@@ -155,8 +162,8 @@ async function callApi(endpoint, method = 'GET', data = null, needsAuth = true, 
                 throw error;
             }
             
-            // Attendre un peu avant de réessayer
-            await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+            // ✅ Backoff exponentiel : attendre 1s, puis 2s, puis 4s...
+            await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt)));
         }
     }
 }
@@ -166,12 +173,21 @@ function clearCache() {
     console.log('🗑 Cache vidé');
 }
 
-// ✅ NOUVEAU : Vérifier la santé de l'API
+// ✅ Vérifier la santé de l'API (compatible PostgreSQL)
 async function checkApiHealth() {
     try {
-        const health = await fetch(`${API_BASE_URL}/health`);
+        // ✅ Utilise l'URL de base pour construire l'endpoint health
+        const healthUrl = API_BASE_URL.replace('/api/v1', '/api/v1/health');
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // Timeout 5s
+        
+        const health = await fetch(healthUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
         const data = await health.json();
         console.log('✅ API Health:', data);
+        
+        // ✅ Vérification compatible PostgreSQL
         return data.status === 'healthy' && data.database === 'connected';
     } catch (error) {
         console.error('❌ API Health check failed:', error);
@@ -259,7 +275,7 @@ function renderLoginPage() {
     checkApiHealth().then(isHealthy => {
         const statusDiv = document.getElementById('apiStatus');
         if (isHealthy) {
-            statusDiv.innerHTML = '<p style="color: green;">✅ API connectée et prête</p>';
+            statusDiv.innerHTML = '<p style="color: green;">✅ API connectée et prête (PostgreSQL)</p>';
         } else {
             statusDiv.innerHTML = '<p style="color: orange;">⚠ L\'API semble indisponible. Veuillez réessayer.</p>';
         }
@@ -642,7 +658,7 @@ async function fetchAndRenderBooks(isWishlist) {
     }
 }
 
-// ✅ NOUVEAU : Formater le statut
+// ✅ Formater le statut
 function formatStatut(statut) {
     const statuts = {
         'a_lire': 'À lire',
@@ -652,13 +668,13 @@ function formatStatut(statut) {
     return statuts[statut] || statut;
 }
 
-// ✅ NOUVEAU : Icône de tri
+// ✅ Icône de tri
 function getSortIcon(column) {
     if (currentSortColumn !== column) return '⇅';
     return currentSortDirection === 'asc' ? '↑' : '↓';
 }
 
-// ✅ NOUVEAU : Échapper le HTML pour éviter les XSS
+// ✅ Échapper le HTML pour éviter les XSS
 function escapeHtml(text) {
     const map = {
         '&': '&amp;',
@@ -992,6 +1008,10 @@ async function moveToCollection(bookId) {
 // --- Initialisation ---
 document.addEventListener('DOMContentLoaded', () => {
     console.time('⏱ Initialisation totale');
+    
+    // ✅ Afficher l'URL de l'API utilisée (pour debug)
+    console.log('🔗 API URL:', API_BASE_URL);
+    console.log('⏱ Cache duration:', CACHE_DURATION, 'ms');
     
     if (currentApiKey) {
         renderNavigation();
