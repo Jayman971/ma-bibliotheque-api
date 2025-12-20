@@ -1,3 +1,7 @@
+/* ========================================
+   BIBLIOTHÈQUE L'ORÉAL - STYLES PRINCIPAUX
+   ======================================== */
+
 :root {
     --color-primary: #2649B2; /* Bleu foncé L'Oréal */
     --color-secondary: #4A74F3; /* Bleu moyen */
@@ -10,7 +14,12 @@
     --color-success: #28a745;
     --color-danger: #dc3545;
     --color-info: #17a2b8;
+    --color-warning: #ffc107;
 }
+
+/* ========================================
+   BASE & LAYOUT
+   ======================================== */
 
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -42,42 +51,8 @@ header {
     text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
 }
 
-nav {
-    margin-top: 20px;
-    display: flex;
-    justify-content: center;
-    flex-wrap: wrap;
-    gap: 10px;
-}
-
-nav button {
-    background-color: var(--color-accent-dark);
-    color: var(--color-text-light);
-    border: none;
-    padding: 12px 25px;
-    border-radius: 25px; /* Forme de pilule */
-    cursor: pointer;
-    transition: all 0.3s ease;
-    font-size: 1.05em;
-    font-weight: bold;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-    text-transform: uppercase;
-}
-
-nav button:hover {
-    background-color: var(--color-accent-light);
-    transform: translateY(-3px) scale(1.02);
-    box-shadow: 0 6px 12px rgba(0,0,0,0.3);
-}
-
-nav button.active {
-    background-color: var(--color-primary);
-    box-shadow: inset 0 2px 8px rgba(0,0,0,0.4);
-    transform: scale(0.98);
-}
-
 main#app-container {
-    flex-grow: 1; /* Prend l'espace restant */
+    flex-grow: 1;
     padding: 30px;
     max-width: 1400px;
     margin: 30px auto;
@@ -102,7 +77,97 @@ h2 {
     margin-bottom: 30px;
 }
 
-/* Page de connexion */
+/* ========================================
+   NAVIGATION
+   ======================================== */
+
+nav {
+    margin-top: 20px;
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+nav button {
+    background-color: var(--color-accent-dark);
+    color: var(--color-text-light);
+    border: none;
+    padding: 12px 25px;
+    border-radius: 25px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 1.05em;
+    font-weight: bold;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    text-transform: uppercase;
+}
+
+nav button:hover {
+    background-color: var(--color-accent-light);
+    transform: translateY(-3px) scale(1.02);
+    box-shadow: 0 6px 12px rgba(0,0,0,0.3);
+}
+
+nav button.active {
+    background-color: var(--color-primary);
+    box-shadow: inset 0 2px 8px rgba(0,0,0,0.4);
+    transform: scale(0.98);
+}
+
+/* ========================================
+   LOADER GLOBAL
+   ======================================== */
+
+.global-loader {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(38, 73, 178, 0.9); /* Bleu L'Oréal avec transparence */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+    backdrop-filter: blur(5px);
+}
+
+.loader-content {
+    background: white;
+    padding: 40px;
+    border-radius: 15px;
+    text-align: center;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+    min-width: 250px;
+}
+
+.loader-text {
+    margin: 10px 0 0;
+    color: var(--color-primary);
+    font-size: 1.1em;
+    font-weight: 600;
+}
+
+.spinner {
+    border: 4px solid var(--color-background-light);
+    border-top: 4px solid var(--color-secondary);
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    animation: spin 1s linear infinite;
+    margin: 0 auto;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* ========================================
+   PAGE DE CONNEXION
+   ======================================== */
+
 .login-container {
     max-width: 450px;
     margin: 80px auto;
@@ -136,7 +201,7 @@ h2 {
 
 .login-container input[type="text"],
 .login-container input[type="password"] {
-    width: calc(100% - 24px); /* Ajustement pour padding */
+    width: calc(100% - 24px);
     padding: 14px 12px;
     border: 1px solid #ddd;
     border-radius: 8px;
@@ -147,7 +212,7 @@ h2 {
 .login-container input[type="text"]:focus,
 .login-container input[type="password"]:focus {
     border-color: var(--color-secondary);
-    box-shadow: 0 0 0 3px rgba(var(--color-secondary), 0.2);
+    box-shadow: 0 0 0 3px rgba(74, 116, 243, 0.2);
     outline: none;
 }
 
@@ -170,7 +235,127 @@ h2 {
     transform: translateY(-2px);
 }
 
-/* Section de filtres et tri */
+/* ✅ NOUVEAU : Statut de l'API */
+.api-status {
+    margin-top: 20px;
+    padding: 15px;
+    border-radius: 8px;
+    font-size: 0.95em;
+}
+
+.api-status p {
+    margin: 5px 0;
+}
+
+/* ========================================
+   PAGE D'ACCUEIL
+   ======================================== */
+
+.homepage {
+    text-align: center;
+    padding: 50px 20px;
+}
+
+.homepage h2 {
+    font-size: 3em;
+    color: var(--color-primary);
+    margin-bottom: 20px;
+    border-bottom: none;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+}
+
+.homepage p.tagline {
+    font-size: 1.4em;
+    color: #666;
+    max-width: 900px;
+    margin: 0 auto 50px;
+    font-style: italic;
+}
+
+.homepage .welcome-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 25px;
+    margin-top: 50px;
+}
+
+.homepage .stat-card {
+    background: linear-gradient(135deg, var(--color-tertiary) 0%, var(--color-accent-dark) 100%);
+    color: var(--color-text-light);
+    padding: 30px 20px;
+    border-radius: 15px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.homepage .stat-card::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+    z-index: 1;
+}
+
+.homepage .stat-card:hover {
+    transform: translateY(-10px) scale(1.03);
+    box-shadow: 0 12px 30px rgba(0,0,0,0.3);
+}
+
+.homepage .stat-card .icon {
+    font-size: 3em;
+    margin-bottom: 15px;
+    color: rgba(255,255,255,0.9);
+    position: relative;
+    z-index: 2;
+}
+
+.homepage .stat-card h4 {
+    font-size: 1.2em;
+    margin: 10px 0;
+    position: relative;
+    z-index: 2;
+    font-weight: 600;
+}
+
+.homepage .stat-card p {
+    margin: 0;
+    position: relative;
+    z-index: 2;
+}
+
+.homepage .stat-card .stat-number {
+    font-size: 2.8em;
+    font-weight: bold;
+    color: white;
+    margin: 10px 0 5px;
+    line-height: 1;
+}
+
+.homepage .stat-card small {
+    font-size: 0.9em;
+    opacity: 0.9;
+    position: relative;
+    z-index: 2;
+}
+
+.homepage .stat-card:nth-child(even) {
+    background: linear-gradient(135deg, var(--color-secondary) 0%, var(--color-primary) 100%);
+}
+
+/* ========================================
+   FILTRES ET RECHERCHE
+   ======================================== */
+
 .filter-sort-section {
     background-color: #f8fbfd;
     padding: 25px;
@@ -205,13 +390,20 @@ h2 {
     font-size: 0.95em;
     box-sizing: border-box;
     background-color: white;
-    transition: border-color 0.3s ease;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 .filter-sort-section input[type="text"]:focus,
 .filter-sort-section select:focus {
-    border-color: var(--color-tertiary);
+    border-color: var(--color-secondary);
     outline: none;
+    box-shadow: 0 0 0 3px rgba(74, 116, 243, 0.1);
+}
+
+.filter-sort-section .filter-buttons {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
 }
 
 .filter-sort-section button {
@@ -232,9 +424,45 @@ h2 {
     transform: translateY(-2px);
 }
 
-/* Tableau des livres */
+.filter-sort-section .secondary-btn {
+    background-color: #6c757d;
+}
+
+.filter-sort-section .secondary-btn:hover {
+    background-color: #5a6268;
+}
+
+/* ✅ NOUVEAU : Barre de statistiques */
+.stats-bar {
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%);
+    color: white;
+    padding: 15px 20px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    justify-content: space-around;
+    align-items: center;
+    box-shadow: 0 4px 15px rgba(38, 73, 178, 0.3);
+}
+
+.stats-bar span {
+    font-size: 14px;
+    white-space: nowrap;
+}
+
+.stats-bar strong {
+    font-size: 18px;
+    font-weight: bold;
+}
+
+/* ========================================
+   TABLEAU DES LIVRES
+   ======================================== */
+
 .book-table-container {
-    overflow-x: auto; /* Pour les petits écrans */
+    overflow-x: auto;
     margin-top: 25px;
     box-shadow: 0 5px 20px rgba(0,0,0,0.08);
     border-radius: 12px;
@@ -244,7 +472,7 @@ h2 {
 .book-table {
     width: 100%;
     border-collapse: collapse;
-    min-width: 700px; /* Assure que le tableau ne devient pas trop petit */
+    min-width: 700px;
 }
 
 .book-table th, .book-table td {
@@ -258,13 +486,14 @@ h2 {
     color: var(--color-text-light);
     font-weight: bold;
     position: sticky;
-    top: 0; /* Garde l'entête visible lors du scroll */
+    top: 0;
     z-index: 999;
 }
 
 .book-table th.sortable {
     cursor: pointer;
     position: relative;
+    user-select: none;
 }
 
 .book-table th.sortable:hover {
@@ -273,28 +502,86 @@ h2 {
 
 .book-table th.sortable .sort-icon {
     margin-left: 8px;
-    font-size: 0.8em;
-    opacity: 0.6;
+    font-size: 1em;
+    opacity: 0.7;
 }
 
-.book-table th.sortable.asc .sort-icon::after { content: " ▲"; }
-.book-table th.sortable.desc .sort-icon::after { content: " ▼"; }
+.book-table th.sortable.asc .sort-icon::after { 
+    content: " ▲"; 
+    opacity: 1;
+}
 
+.book-table th.sortable.desc .sort-icon::after { 
+    content: " ▼"; 
+    opacity: 1;
+}
 
 .book-table tbody tr:nth-child(even) {
     background-color: #f9f9f9;
 }
 
 .book-table tbody tr:hover {
-    background-color: #f0f8ff;
+    background-color: #e8f4f8;
+    transition: background-color 0.2s ease;
 }
 
 .book-table td {
     color: #555;
 }
 
+/* ✅ NOUVEAU : Titre de livre mis en valeur */
+.book-title {
+    font-weight: 600;
+    color: var(--color-primary);
+    font-size: 1.05em;
+}
+
+/* ✅ NOUVEAU : Badge propriétaire */
+.badge {
+    background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 0.85em;
+    font-weight: 600;
+    text-transform: uppercase;
+    display: inline-block;
+}
+
+/* ✅ NOUVEAU : Badges de statut */
+.status-badge {
+    padding: 5px 12px;
+    border-radius: 15px;
+    font-size: 0.85em;
+    font-weight: 600;
+    text-transform: capitalize;
+    display: inline-block;
+}
+
+.status-a_lire {
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeaa7;
+}
+
+.status-en_cours {
+    background: #d1ecf1;
+    color: #0c5460;
+    border: 1px solid #bee5eb;
+}
+
+.status-lu {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+/* ========================================
+   BOUTONS D'ACTION
+   ======================================== */
+
 .book-table .actions-cell {
-    white-space: nowrap; /* Empêche les boutons de passer à la ligne */
+    white-space: nowrap;
 }
 
 .book-table .actions-cell button {
@@ -326,8 +613,53 @@ h2 {
     border-color: #bd2130;
 }
 
+/* ✅ NOUVEAU : Boutons d'action compacts et modernes */
+.btn-edit, .btn-delete, .btn-move {
+    padding: 8px 12px;
+    margin: 0 3px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 0.9em;
+    color: white;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
 
-/* Formulaires d'ajout/édition */
+.btn-edit {
+    background: linear-gradient(135deg, #4A74F3 0%, #2649B2 100%);
+}
+
+.btn-edit:hover {
+    background: linear-gradient(135deg, #2649B2 0%, #1a3580 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 10px rgba(74, 116, 243, 0.3);
+}
+
+.btn-delete {
+    background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+}
+
+.btn-delete:hover {
+    background: linear-gradient(135deg, #c0392b 0%, #a93226 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 10px rgba(231, 76, 60, 0.3);
+}
+
+.btn-move {
+    background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+}
+
+.btn-move:hover {
+    background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 10px rgba(46, 204, 113, 0.3);
+}
+
+/* ========================================
+   FORMULAIRES
+   ======================================== */
+
 .book-form-container {
     max-width: 650px;
     margin: 30px auto;
@@ -341,11 +673,15 @@ h2 {
 .book-form-container h2 {
     color: var(--color-secondary);
     margin-bottom: 30px;
-    border-bottom: 1px solid var(--color-background-light);
+    border-bottom: 2px solid var(--color-background-light);
     padding-bottom: 15px;
 }
 
-.book-form-container label {
+.form-group {
+    margin-bottom: 25px;
+}
+
+.form-group label {
     display: block;
     margin-bottom: 10px;
     font-weight: bold;
@@ -353,21 +689,90 @@ h2 {
     font-size: 1.05em;
 }
 
+.required {
+    color: var(--color-danger);
+    margin-left: 3px;
+}
+
 .book-form-container input[type="text"],
 .book-form-container input[type="number"],
 .book-form-container select {
-    width: calc(100% - 24px); /* Ajustement pour padding */
+    width: 100%;
     padding: 12px;
-    margin-bottom: 20px;
     border: 1px solid #ccc;
     border-radius: 8px;
     font-size: 1em;
     background-color: white;
+    box-sizing: border-box;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.book-form-container input:focus,
+.book-form-container select:focus {
+    border-color: var(--color-secondary);
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(74, 116, 243, 0.1);
+}
+
+.checkbox-group {
+    display: flex;
+    align-items: center;
+}
+
+.checkbox-group label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    font-weight: 500;
 }
 
 .book-form-container input[type="checkbox"] {
-    margin-right: 12px;
-    transform: scale(1.3); /* Agrandir la checkbox */
+    margin-right: 10px;
+    transform: scale(1.3);
+    cursor: pointer;
+}
+
+.form-actions {
+    display: flex;
+    gap: 15px;
+    margin-top: 30px;
+    justify-content: flex-start;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--color-secondary) 0%, var(--color-primary) 100%);
+    color: var(--color-text-light);
+    border: none;
+    padding: 14px 30px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1.1em;
+    font-weight: bold;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(74, 116, 243, 0.3);
+}
+
+.btn-primary:hover {
+    background: linear-gradient(135deg, var(--color-primary) 0%, #1a3580 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(74, 116, 243, 0.4);
+}
+
+.btn-secondary {
+    background-color: #6c757d;
+    color: var(--color-text-light);
+    border: none;
+    padding: 14px 30px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1.1em;
+    font-weight: bold;
+    transition: all 0.3s ease;
+}
+
+.btn-secondary:hover {
+    background-color: #5a6268;
+    transform: translateY(-2px);
 }
 
 .book-form-container button[type="submit"] {
@@ -389,147 +794,23 @@ h2 {
     transform: translateY(-2px);
 }
 
-/* Accueil */
-.homepage {
-    text-align: center;
-    padding: 50px 20px;
-}
-
-.homepage h2 {
-    font-size: 3em;
-    color: var(--color-primary);
-    margin-bottom: 20px;
-    border-bottom: none;
-    text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
-}
-
-.homepage p.tagline {
-    font-size: 1.4em;
-    color: #666;
-    max-width: 900px;
-    margin: 0 auto 50px;
-    font-style: italic;
-}
-
-.homepage .welcome-stats {
-    display: flex;
-    justify-content: center;
-    gap: 40px;
-    margin-top: 50px;
-    flex-wrap: wrap;
-}
-
-.homepage .stat-card {
-    background-color: var(--color-tertiary); /* Couleur plus vive */
-    color: var(--color-text-light);
-    padding: 30px 40px;
-    border-radius: 15px;
-    box-shadow: 0 8px 20px rgba(0,0,0,0.2);
-    min-width: 250px;
-    flex: 1;
-    max-width: 300px;
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    position: relative;
-    overflow: hidden;
-}
-
-.homepage .stat-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: radial-gradient(circle at top left, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 70%);
-    z-index: 1;
-}
-
-.homepage .stat-card:hover {
-    transform: translateY(-10px) scale(1.03);
-    box-shadow: 0 12px 30px rgba(0,0,0,0.3);
-}
-
-.homepage .stat-card .icon {
-    font-size: 3.5em;
-    margin-bottom: 15px;
-    color: rgba(255,255,255,0.8);
-    position: relative;
-    z-index: 2;
-}
-
-.homepage .stat-card h4 {
-    font-size: 1.6em;
-    margin-top: 0;
-    margin-bottom: 10px;
-    position: relative;
-    z-index: 2;
-}
-
-.homepage .stat-card p {
-    font-size: 2.5em;
-    font-weight: bold;
-    margin: 0;
-    position: relative;
-    z-index: 2;
-}
-
-.homepage .stat-card:nth-child(even) { /* Pour alterner les couleurs */
-    background-color: var(--color-accent-dark);
-}
-
-/* Messages d'alerte */
-.alert-message {
-    padding: 15px;
-    margin-bottom: 25px;
-    border-radius: 10px;
-    font-weight: bold;
-    text-align: center;
-    opacity: 0;
-    transition: opacity 0.5s ease-in-out;
-    position: relative;
-    z-index: 1001; /* Au-dessus de tout */
-    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-}
-
-.alert-message.success {
-    background-color: #d4edda;
-    color: var(--color-success);
-    border: 1px solid #c3e6cb;
-}
-
-.alert-message.error {
-    background-color: #f8d7da;
-    color: var(--color-danger);
-    border: 1px solid #f5c6cb;
-}
-.alert-message.info {
-    background-color: #d1ecf1;
-    color: var(--color-info);
-    border: 1px solid #bee5eb;
-}
-
-.alert-message.visible {
-    opacity: 1;
-}
-/* ===== PAGINATION STYLES ===== */
+/* ========================================
+   PAGINATION
+   ======================================== */
 
 .pagination-info {
     text-align: center;
     margin: 20px 0;
-    padding: 10px;
-    background: linear-gradient(135deg, #D4D9F0 0%, #6C8BE0 20%);
+    padding: 12px;
+    background: linear-gradient(135deg, #D4D9F0 0%, rgba(108, 139, 224, 0.2) 100%);
     border-radius: 10px;
+    border: 1px solid var(--color-secondary);
 }
 
 .pagination-text {
     margin: 0;
     font-size: 16px;
-    color: #2649B2;
+    color: var(--color-primary);
     font-weight: 500;
 }
 
@@ -540,8 +821,9 @@ h2 {
     gap: 15px;
     margin: 30px 0;
     padding: 20px;
-    background: #f8f9fa;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
     border-radius: 15px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.08);
 }
 
 .pagination-buttons {
@@ -555,28 +837,29 @@ h2 {
 .pagination-buttons button {
     padding: 10px 16px;
     background: white;
-    border: 2px solid #4A74F3;
-    color: #4A74F3;
+    border: 2px solid var(--color-secondary);
+    color: var(--color-secondary);
     border-radius: 8px;
     cursor: pointer;
     font-size: 14px;
-    font-weight: 500;
+    font-weight: 600;
     transition: all 0.3s ease;
     min-width: 45px;
 }
 
 .pagination-buttons button:hover:not(:disabled) {
-    background: #4A74F3;
+    background: var(--color-secondary);
     color: white;
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(74, 116, 243, 0.3);
 }
 
 .pagination-buttons button.active {
-    background: #2649B2;
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%);
     color: white;
-    border-color: #2649B2;
+    border-color: var(--color-primary);
     font-weight: bold;
+    box-shadow: 0 4px 12px rgba(38, 73, 178, 0.4);
 }
 
 .pagination-buttons button:disabled {
@@ -591,6 +874,7 @@ h2 {
     padding: 10px 8px;
     color: #6c757d;
     font-weight: bold;
+    font-size: 16px;
 }
 
 .pagination-goto {
@@ -604,44 +888,248 @@ h2 {
 }
 
 .pagination-goto label {
-    font-weight: 500;
-    color: #2649B2;
+    font-weight: 600;
+    color: var(--color-primary);
     white-space: nowrap;
 }
 
 .pagination-goto input {
     width: 70px;
     padding: 8px;
-    border: 2px solid #4A74F3;
+    border: 2px solid var(--color-secondary);
     border-radius: 6px;
     text-align: center;
     font-size: 14px;
+    font-weight: 600;
 }
 
 .pagination-goto input:focus {
     outline: none;
-    border-color: #2649B2;
+    border-color: var(--color-primary);
     box-shadow: 0 0 0 3px rgba(74, 116, 243, 0.2);
 }
 
 .pagination-goto button {
     padding: 8px 20px;
-    background: #8E7DE3;
+    background: linear-gradient(135deg, var(--color-tertiary) 0%, var(--color-accent-dark) 100%);
     color: white;
     border: none;
     border-radius: 6px;
     cursor: pointer;
-    font-weight: 500;
+    font-weight: 600;
     transition: all 0.3s;
+    box-shadow: 0 2px 8px rgba(142, 125, 227, 0.3);
 }
 
 .pagination-goto button:hover {
-    background: #9D5CE6;
+    background: linear-gradient(135deg, var(--color-accent-dark) 0%, var(--color-accent-light) 100%);
     transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(157, 92, 230, 0.4);
 }
 
-/* Responsive pour mobile */
+#itemsPerPageSelect {
+    padding: 10px 14px;
+    border: 2px solid var(--color-secondary);
+    border-radius: 8px;
+    background: white;
+    color: var(--color-primary);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+#itemsPerPageSelect:hover {
+    border-color: var(--color-primary);
+    box-shadow: 0 2px 8px rgba(74, 116, 243, 0.2);
+}
+
+#itemsPerPageSelect:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(74, 116, 243, 0.2);
+}
+
+/* ========================================
+   MESSAGES & ÉTATS
+   ======================================== */
+
+.alert-message {
+    padding: 15px 20px;
+    margin-bottom: 25px;
+    border-radius: 10px;
+    font-weight: 600;
+    text-align: center;
+    opacity: 0;
+    transition: opacity 0.5s ease-in-out;
+    position: relative;
+    z-index: 1001;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    font-size: 1em;
+}
+
+.alert-message.success {
+    background-color: #d4edda;
+    color: var(--color-success);
+    border: 2px solid #c3e6cb;
+}
+
+.alert-message.error {
+    background-color: #f8d7da;
+    color: var(--color-danger);
+    border: 2px solid #f5c6cb;
+}
+
+.alert-message.info {
+    background-color: #d1ecf1;
+    color: var(--color-info);
+    border: 2px solid #bee5eb;
+}
+
+.alert-message.visible {
+    opacity: 1;
+}
+
+/* ✅ NOUVEAU : État vide */
+.empty-state {
+    text-align: center;
+    padding: 80px 20px;
+    color: #999;
+}
+
+.empty-state i {
+    color: #ddd;
+    margin-bottom: 25px;
+    display: block;
+}
+
+.empty-state p {
+    font-size: 1.2em;
+    margin-bottom: 20px;
+    color: #666;
+}
+
+.empty-state button {
+    background: var(--color-secondary);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1em;
+    font-weight: 600;
+    transition: all 0.3s;
+    box-shadow: 0 4px 12px rgba(74, 116, 243, 0.2);
+}
+
+.empty-state button:hover {
+    background: var(--color-primary);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(74, 116, 243, 0.3);
+}
+
+/* ✅ NOUVEAU : Message d'erreur amélioré */
+.error-message {
+    text-align: center;
+    padding: 40px 30px;
+    background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+    border: 2px solid var(--color-warning);
+    border-radius: 12px;
+    margin: 20px 0;
+    box-shadow: 0 4px 15px rgba(255, 193, 7, 0.2);
+}
+
+.error-message i {
+    font-size: 3em;
+    color: #ff6b6b;
+    margin-bottom: 15px;
+    display: block;
+}
+
+.error-message p {
+    font-size: 1.2em;
+    color: #856404;
+    margin: 10px 0;
+    font-weight: 600;
+}
+
+.error-message small {
+    color: #856404;
+    font-size: 0.9em;
+    display: block;
+    margin-top: 10px;
+}
+
+.error-message button {
+    margin-top: 20px;
+    background: var(--color-secondary);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.3s;
+}
+
+.error-message button:hover {
+    background: var(--color-primary);
+    transform: translateY(-2px);
+}
+
+/* ========================================
+   RESPONSIVE
+   ======================================== */
+
 @media (max-width: 768px) {
+    .app-title {
+        font-size: 1.8em;
+    }
+    
+    nav button {
+        padding: 10px 20px;
+        font-size: 0.95em;
+    }
+    
+    main#app-container {
+        padding: 20px;
+        margin: 20px 10px;
+    }
+    
+    .homepage h2 {
+        font-size: 2em;
+    }
+    
+    .homepage p.tagline {
+        font-size: 1.1em;
+    }
+    
+    .homepage .welcome-stats {
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
+    
+    .filter-sort-section {
+        padding: 15px;
+    }
+    
+    .filter-sort-section div {
+        min-width: 100%;
+    }
+    
+    .stats-bar {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .book-table-container {
+        border-radius: 8px;
+    }
+    
+    .book-table th, .book-table td {
+        padding: 10px;
+        font-size: 0.9em;
+    }
+    
     .pagination-buttons button {
         padding: 8px 12px;
         font-size: 12px;
@@ -656,27 +1144,118 @@ h2 {
     .pagination-goto input {
         width: 100%;
     }
+    
+    .book-form-container {
+        padding: 25px;
+    }
+    
+    .form-actions {
+        flex-direction: column;
+    }
+    
+    .btn-primary, .btn-secondary {
+        width: 100%;
+    }
 }
 
-/* Style pour le sélecteur d'éléments par page */
-#itemsPerPageSelect {
-    padding: 8px 12px;
-    border: 2px solid #4A74F3;
-    border-radius: 8px;
-    background: white;
-    color: #2649B2;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.3s;
+@media (max-width: 480px) {
+    .app-title {
+        font-size: 1.5em;
+    }
+    
+    nav {
+        flex-direction: column;
+    }
+    
+    nav button {
+        width: 100%;
+    }
+    
+    .homepage .stat-card .stat-number {
+        font-size: 2.2em;
+    }
+    
+    .login-container {
+        padding: 30px 20px;
+        margin: 40px 10px;
+    }
 }
 
-#itemsPerPageSelect:hover {
-    border-color: #2649B2;
-    box-shadow: 0 2px 8px rgba(74, 116, 243, 0.2);
+/* ========================================
+   ANIMATIONS & TRANSITIONS
+   ======================================== */
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateX(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
 }
 
-#itemsPerPageSelect:focus {
-    outline: none;
-    border-color: #2649B2;
-    box-shadow: 0 0 0 3px rgba(74, 116, 243, 0.2);
+@keyframes pulse {
+    0%, 100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.05);
+    }
+}
+
+.book-table tbody tr {
+    animation: slideIn 0.3s ease-out;
+}
+
+/* ========================================
+   UTILITAIRES
+   ======================================== */
+
+.text-center {
+    text-align: center;
+}
+
+.mt-20 {
+    margin-top: 20px;
+}
+
+.mb-20 {
+    margin-bottom: 20px;
+}
+
+.hidden {
+    display: none;
+}
+
+/* ========================================
+   ACCESSIBILITÉ
+   ======================================== */
+
+button:focus,
+input:focus,
+select:focus {
+    outline: 2px solid var(--color-secondary);
+    outline-offset: 2px;
+}
+
+/* Mode contraste élevé */
+@media (prefers-contrast: high) {
+    button,
+    .btn-primary,
+    .btn-secondary {
+        border: 2px solid currentColor;
+    }
+}
+
+/* Réduction de mouvement */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
 }

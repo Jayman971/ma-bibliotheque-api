@@ -1,4 +1,4 @@
-// script.js - VERSION AVEC PAGINATION
+// script.js - VERSION OPTIMISÉE POUR POSTGRESQL
 
 // --- Configuration de l'API ---
 const API_BASE_URL = 'https://ma-bibliotheque-api.onrender.com/api/v1';
@@ -8,9 +8,9 @@ let currentApiKey = localStorage.getItem(API_KEY_STORAGE_KEY);
 let currentSortColumn = 'titre';
 let currentSortDirection = 'asc';
 
-// ✅ NOUVEAU : Variables de pagination
+// ✅ Variables de pagination
 let currentPage = 1;
-let itemsPerPage = 50; // Nombre de livres par page (modifiable)
+let itemsPerPage = 50;
 let totalItems = 0;
 let totalPages = 0;
 
@@ -18,9 +18,12 @@ let totalPages = 0;
 const appContainer = document.getElementById('app-container');
 const mainNav = document.getElementById('mainNav');
 
-// --- Système de cache ---
+// --- Système de cache amélioré ---
 const apiCache = new Map();
-const CACHE_DURATION = 30000;
+const CACHE_DURATION = 30000; // 30 secondes
+
+// ✅ NOUVEAU : Loader global
+let globalLoader = null;
 
 // --- Fonctions utilitaires ---
 
@@ -40,7 +43,32 @@ function showAlert(message, type = 'success', duration = 3000) {
     }, duration);
 }
 
-async function callApi(endpoint, method = 'GET', data = null, needsAuth = true, useCache = false) {
+// ✅ NOUVEAU : Afficher/masquer le loader global
+function showLoader(message = 'Chargement...') {
+    if (!globalLoader) {
+        globalLoader = document.createElement('div');
+        globalLoader.className = 'global-loader';
+        globalLoader.innerHTML = `
+            <div class="loader-content">
+                <div class="spinner"></div>
+                <p class="loader-text">${message}</p>
+            </div>
+        `;
+        document.body.appendChild(globalLoader);
+    } else {
+        globalLoader.querySelector('.loader-text').textContent = message;
+        globalLoader.style.display = 'flex';
+    }
+}
+
+function hideLoader() {
+    if (globalLoader) {
+        globalLoader.style.display = 'none';
+    }
+}
+
+// ✅ AMÉLIORÉ : Appel API avec retry automatique
+async function callApi(endpoint, method = 'GET', data = null, needsAuth = true, useCache = false, retries = 2) {
     const headers = {
         'Content-Type': 'application/json'
     };
@@ -55,14 +83,19 @@ async function callApi(endpoint, method = 'GET', data = null, needsAuth = true, 
     }
 
     let finalEndpoint = endpoint;
+    
+    // ✅ Cache uniquement pour les GET
     if (method === 'GET') {
-        const separator = endpoint.includes('?') ? '&' : '?';
-        finalEndpoint = `${endpoint}${separator}_t=${Date.now()}`;
+        // Anti-cache timestamp uniquement si pas de cache utilisé
+        if (!useCache) {
+            const separator = endpoint.includes('?') ? '&' : '?';
+            finalEndpoint = `${endpoint}${separator}_t=${Date.now()}`;
+        }
         
         if (useCache) {
             const cached = apiCache.get(endpoint);
             if (cached && (Date.now() - cached.timestamp < CACHE_DURATION)) {
-                console.log('📦 Utilisation du cache pour:', endpoint);
+                console.log('📦 Cache hit:', endpoint);
                 return cached.data;
             }
         }
@@ -77,45 +110,73 @@ async function callApi(endpoint, method = 'GET', data = null, needsAuth = true, 
         options.body = JSON.stringify(data);
     }
 
-    try {
-        console.time(`API ${method} ${endpoint}`);
-        const response = await fetch(`${API_BASE_URL}${finalEndpoint}`, options);
-        console.timeEnd(`API ${method} ${endpoint}`);
-        
-        if (response.status === 401) {
-            showAlert('Session expirée ou non valide. Veuillez vous reconnecter.', 'error');
-            logout();
-            return;
+    // ✅ Retry logic
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            console.time(`API ${method} ${endpoint}`);
+            const response = await fetch(`${API_BASE_URL}${finalEndpoint}`, options);
+            console.timeEnd(`API ${method} ${endpoint}`);
+            
+            if (response.status === 401) {
+                showAlert('Session expirée ou non valide. Veuillez vous reconnecter.', 'error');
+                logout();
+                return;
+            }
+            
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ message: 'Erreur inconnue' }));
+                throw new Error(errorData.message || `Erreur HTTP: ${response.status}`);
+            }
+            
+            const result = await response.json();
+            
+            // ✅ Mettre en cache les GET
+            if (method === 'GET' && useCache) {
+                apiCache.set(endpoint, {
+                    data: result,
+                    timestamp: Date.now()
+                });
+                console.log('💾 Mise en cache:', endpoint);
+            }
+            
+            // ✅ Invalider le cache pour les modifications
+            if (method === 'POST' || method === 'PUT' || method === 'DELETE') {
+                clearCache();
+            }
+            
+            return result;
+            
+        } catch (error) {
+            console.error(`Tentative ${attempt + 1}/${retries + 1} échouée:`, error);
+            
+            // Si c'est la dernière tentative, on lance l'erreur
+            if (attempt === retries) {
+                showAlert(`Erreur API : ${error.message}`, 'error');
+                throw error;
+            }
+            
+            // Attendre un peu avant de réessayer
+            await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
         }
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || `Erreur HTTP: ${response.status}`);
-        }
-        
-        const result = await response.json();
-        
-        if (method === 'GET' && useCache) {
-            apiCache.set(endpoint, {
-                data: result,
-                timestamp: Date.now()
-            });
-        }
-        
-        if (method === 'POST' || method === 'PUT' || method === 'DELETE') {
-            clearCache();
-        }
-        
-        return result;
-    } catch (error) {
-        console.error("Erreur d'appel API:", error);
-        showAlert(`Erreur API : ${error.message}`, 'error');
-        throw error;
     }
 }
 
 function clearCache() {
     apiCache.clear();
     console.log('🗑 Cache vidé');
+}
+
+// ✅ NOUVEAU : Vérifier la santé de l'API
+async function checkApiHealth() {
+    try {
+        const health = await fetch(`${API_BASE_URL}/health`);
+        const data = await health.json();
+        console.log('✅ API Health:', data);
+        return data.status === 'healthy' && data.database === 'connected';
+    } catch (error) {
+        console.error('❌ API Health check failed:', error);
+        return false;
+    }
 }
 
 // --- Système de routage/pages ---
@@ -133,7 +194,7 @@ function showPage(pageName, data = {}) {
         return;
     }
     
-    // ✅ NOUVEAU : Réinitialiser la pagination lors du changement de page
+    // ✅ Réinitialiser la pagination lors du changement de page
     currentPage = 1;
     
     document.querySelectorAll('#mainNav button').forEach(btn => btn.classList.remove('active'));
@@ -176,25 +237,39 @@ function renderLoginPage() {
     mainNav.innerHTML = '';
     appContainer.innerHTML = `
         <div class="login-container">
-            <h2>Connexion à la Bibliothèque</h2>
+            <h2>🔐 Connexion à la Bibliothèque</h2>
             <form id="loginForm">
                 <div>
                     <label for="username">Nom d'utilisateur:</label>
-                    <input type="text" id="username" name="username" required>
+                    <input type="text" id="username" name="username" required autocomplete="username">
                 </div>
                 <div>
                     <label for="password">Mot de passe:</label>
-                    <input type="password" id="password" name="password" required>
+                    <input type="password" id="password" name="password" required autocomplete="current-password">
                 </div>
                 <button type="submit">Se connecter</button>
             </form>
+            <div id="apiStatus" class="api-status"></div>
         </div>
     `;
+    
     document.getElementById('loginForm').addEventListener('submit', handleLogin);
+    
+    // ✅ Vérifier la santé de l'API
+    checkApiHealth().then(isHealthy => {
+        const statusDiv = document.getElementById('apiStatus');
+        if (isHealthy) {
+            statusDiv.innerHTML = '<p style="color: green;">✅ API connectée et prête</p>';
+        } else {
+            statusDiv.innerHTML = '<p style="color: orange;">⚠ L\'API semble indisponible. Veuillez réessayer.</p>';
+        }
+    });
 }
 
 async function handleLogin(event) {
     event.preventDefault();
+    showLoader('Connexion en cours...');
+    
     const username = document.getElementById('username').value;
     const password = document.getElementById('password').value;
 
@@ -202,11 +277,13 @@ async function handleLogin(event) {
         const response = await callApi('/login', 'POST', { username, password }, false);
         currentApiKey = response.api_key;
         localStorage.setItem(API_KEY_STORAGE_KEY, currentApiKey);
+        hideLoader();
         showAlert('Connexion réussie !', 'success');
         renderNavigation();
         showPage('home');
     } catch (error) {
-        // Erreur déjà gérée
+        hideLoader();
+        // Erreur déjà gérée par callApi
     }
 }
 
@@ -220,63 +297,104 @@ function logout() {
 
 // --- Page d'accueil ---
 async function renderHomePage() {
-    appContainer.innerHTML = '<div class="homepage"><h2>Bienvenue dans votre Bibliothèque !</h2><p class="tagline">Organisez, découvrez, et partagez vos lectures préférées.</p><div id="homeStats" class="welcome-stats">Chargement des statistiques...</div></div>';
+    appContainer.innerHTML = `
+        <div class="homepage">
+            <h2>📚 Bienvenue dans votre Bibliothèque !</h2>
+            <p class="tagline">Organisez, découvrez, et partagez vos lectures préférées.</p>
+            <div id="homeStats" class="welcome-stats">
+                <div class="spinner"></div>
+                <p>Chargement des statistiques...</p>
+            </div>
+        </div>
+    `;
     
     console.time('Chargement stats');
     
     try {
-        // ✅ Utilisation de l'endpoint /stats optimisé
+        // ✅ Utilisation de l'endpoint /stats optimisé avec cache
         const stats = await callApi('/stats', 'GET', null, true, true);
         
-        const collectionStats = stats.collection;
-        const wishlistStats = stats.wishlist;
+        const collectionStats = stats.collection || {};
+        const wishlistStats = stats.wishlist || {};
 
         const homeStatsDiv = document.getElementById('homeStats');
         homeStatsDiv.innerHTML = `
             <div class="stat-card">
-                <i class="fas fa-books icon"></i>
-                <h4>Total Livres</h4>
-                <p>${collectionStats.total + wishlistStats.total}</p>
-            </div>
-            <div class="stat-card">
-                <i class="fas fa-user-alt icon"></i>
-                <h4>Livres de J</h4>
-                <p>${collectionStats.mes_livres + wishlistStats.mes_souhaits}</p>
-            </div>
-            <div class="stat-card">
-                <i class="fas fa-user-friends icon"></i>
-                <h4>Livres de K</h4>
-                <p>${collectionStats.livres_k + wishlistStats.souhaits_k}</p>
-            </div>
-            <div class="stat-card">
-                <i class="fas fa-bookmark icon"></i>
-                <h4>À Lire</h4>
-                <p>${collectionStats.a_lire}</p>
+                <i class="fas fa-book icon"></i>
+                <h4>Collection</h4>
+                <p class="stat-number">${collectionStats.total || 0}</p>
+                <small>livres</small>
             </div>
             <div class="stat-card">
                 <i class="fas fa-heart icon"></i>
                 <h4>Wishlist</h4>
-                <p>${wishlistStats.total}</p>
+                <p class="stat-number">${wishlistStats.total || 0}</p>
+                <small>souhaits</small>
+            </div>
+            <div class="stat-card">
+                <i class="fas fa-user-alt icon"></i>
+                <h4>Livres de J</h4>
+                <p class="stat-number">${(collectionStats.mes_livres || 0) + (wishlistStats.mes_souhaits || 0)}</p>
+                <small>au total</small>
+            </div>
+            <div class="stat-card">
+                <i class="fas fa-user-friends icon"></i>
+                <h4>Livres de K</h4>
+                <p class="stat-number">${(collectionStats.livres_k || 0) + (wishlistStats.souhaits_k || 0)}</p>
+                <small>au total</small>
+            </div>
+            <div class="stat-card">
+                <i class="fas fa-bookmark icon"></i>
+                <h4>À Lire</h4>
+                <p class="stat-number">${collectionStats.a_lire || 0}</p>
+                <small>livres</small>
+            </div>
+            <div class="stat-card">
+                <i class="fas fa-book-reader icon"></i>
+                <h4>En Cours</h4>
+                <p class="stat-number">${collectionStats.en_cours || 0}</p>
+                <small>livres</small>
+            </div>
+            <div class="stat-card">
+                <i class="fas fa-check-circle icon"></i>
+                <h4>Lus</h4>
+                <p class="stat-number">${collectionStats.lus || 0}</p>
+                <small>livres</small>
+            </div>
+            <div class="stat-card">
+                <i class="fas fa-star icon"></i>
+                <h4>Note Moyenne</h4>
+                <p class="stat-number">${collectionStats.note_moyenne || 'N/A'}</p>
+                <small>sur 5</small>
             </div>
         `;
         
         console.timeEnd('Chargement stats');
     } catch (error) {
-        document.getElementById('homeStats').innerHTML = `<p style="color: red;">Impossible de charger les statistiques : ${error.message}</p>`;
+        document.getElementById('homeStats').innerHTML = `
+            <div class="error-message">
+                <i class="fas fa-exclamation-triangle"></i>
+                <p>Impossible de charger les statistiques</p>
+                <small>${error.message}</small>
+                <button onclick="showPage('home')" style="margin-top: 10px;">
+                    <i class="fas fa-redo"></i> Réessayer
+                </button>
+            </div>
+        `;
     }
 }
 
 // --- Page de liste de livres avec PAGINATION ---
 async function renderBookListPage(data) {
     const isWishlist = data.isWishlist;
-    const pageTitle = isWishlist ? 'Ma Wishlist' : 'Ma Collection de Livres';
+    const pageTitle = isWishlist ? '💖 Ma Wishlist' : '📚 Ma Collection de Livres';
     const endpoint = isWishlist ? '/wishlist' : '/books';
 
     appContainer.innerHTML = `
         <h2>${pageTitle}</h2>
         <div class="filter-sort-section">
             <div>
-                <label for="searchQuery">Rechercher par Titre/Auteur:</label>
+                <label for="searchQuery">🔍 Rechercher:</label>
                 <input type="text" id="searchQuery" placeholder="Titre ou Auteur">
             </div>
             <div>
@@ -288,7 +406,7 @@ async function renderBookListPage(data) {
             </div>
             ${!isWishlist ? `
             <div>
-                <label for="proprietaireFilter">Propriétaire:</label>
+                <label for="proprietaireFilter">👤 Propriétaire:</label>
                 <select id="proprietaireFilter">
                     <option value="">Tous</option>
                     <option value="J">J</option>
@@ -296,7 +414,7 @@ async function renderBookListPage(data) {
                 </select>
             </div>
             <div>
-                <label for="statutFilter">Statut de lecture:</label>
+                <label for="statutFilter">📖 Statut:</label>
                 <select id="statutFilter">
                     <option value="">Tous</option>
                     <option value="a_lire">À lire</option>
@@ -305,9 +423,8 @@ async function renderBookListPage(data) {
                 </select>
             </div>` : ''}
             
-            <!-- ✅ NOUVEAU : Sélecteur d'éléments par page -->
             <div>
-                <label for="itemsPerPageSelect">Livres par page:</label>
+                <label for="itemsPerPageSelect">📄 Par page:</label>
                 <select id="itemsPerPageSelect">
                     <option value="10">10</option>
                     <option value="25">25</option>
@@ -318,36 +435,36 @@ async function renderBookListPage(data) {
                 </select>
             </div>
             
-            <div>
-                <button id="applyFiltersBtn">Appliquer les filtres</button>
-                <button id="refreshBtn" style="margin-left: 10px;">🔄 Rafraîchir</button>
+            <div class="filter-buttons">
+                <button id="applyFiltersBtn"><i class="fas fa-filter"></i> Filtrer</button>
+                <button id="refreshBtn" class="secondary-btn"><i class="fas fa-sync-alt"></i> Actualiser</button>
             </div>
         </div>
         
-        <!-- ✅ NOUVEAU : Informations de pagination en haut -->
         <div id="paginationInfo" class="pagination-info"></div>
         
-        <div id="bookListContent">Chargement des livres...</div>
+        <div id="bookListContent">
+            <div class="spinner"></div>
+            <p>Chargement des livres...</p>
+        </div>
         
-        <!-- ✅ NOUVEAU : Contrôles de pagination en bas -->
         <div id="paginationControls" class="pagination-controls"></div>
     `;
 
     document.getElementById('applyFiltersBtn').addEventListener('click', () => {
-        currentPage = 1; // Réinitialiser à la page 1 lors d'une nouvelle recherche
+        currentPage = 1;
         fetchAndRenderBooks(isWishlist);
     });
     
     document.getElementById('refreshBtn').addEventListener('click', () => {
         clearCache();
         fetchAndRenderBooks(isWishlist);
-        showAlert('Données rafraîchies !', 'info', 1500);
+        showAlert('Données actualisées !', 'info', 1500);
     });
     
-    // ✅ NOUVEAU : Changement du nombre d'éléments par page
     document.getElementById('itemsPerPageSelect').addEventListener('change', (e) => {
         itemsPerPage = parseInt(e.target.value);
-        currentPage = 1; // Retour à la page 1
+        currentPage = 1;
         fetchAndRenderBooks(isWishlist);
     });
     
@@ -361,15 +478,15 @@ async function renderBookListPage(data) {
     fetchAndRenderBooks(isWishlist);
 }
 
-// ✅ OPTIMISÉ : Chargement avec pagination
+// ✅ Chargement avec pagination
 async function fetchAndRenderBooks(isWishlist) {
     const bookListContent = document.getElementById('bookListContent');
-    bookListContent.innerHTML = '<p>Chargement des livres...</p>';
+    bookListContent.innerHTML = '<div class="spinner"></div><p>Chargement des livres...</p>';
 
-    const searchQuery = document.getElementById('searchQuery').value;
+    const searchQuery = document.getElementById('searchQuery').value.trim();
     const searchBy = document.getElementById('searchBy').value;
-    const proprietaireFilter = isWishlist ? '' : document.getElementById('proprietaireFilter').value;
-    const statutFilter = isWishlist ? '' : document.getElementById('statutFilter').value;
+    const proprietaireFilter = isWishlist ? '' : (document.getElementById('proprietaireFilter')?.value || '');
+    const statutFilter = isWishlist ? '' : (document.getElementById('statutFilter')?.value || '');
 
     let queryString = new URLSearchParams();
     if (searchQuery) {
@@ -383,11 +500,9 @@ async function fetchAndRenderBooks(isWishlist) {
         queryString.append('statut', statutFilter);
     }
     
-    // ✅ NOUVEAU : Paramètres de tri
+    // ✅ Paramètres de tri et pagination
     queryString.append('sort_by', currentSortColumn);
     queryString.append('sort_dir', currentSortDirection);
-    
-    // ✅ NOUVEAU : Paramètres de pagination
     queryString.append('page', currentPage);
     queryString.append('per_page', itemsPerPage);
 
@@ -396,72 +511,109 @@ async function fetchAndRenderBooks(isWishlist) {
     console.time('Chargement livres');
     
     try {
-        const response = await callApi(`${endpoint}?${queryString.toString()}`);
+        // ✅ Utiliser le cache pour améliorer les performances
+        const response = await callApi(`${endpoint}?${queryString.toString()}`, 'GET', null, true, true);
         let books = isWishlist ? response.wishlist_books : response.books;
         const stats = response.stats;
 
         console.timeEnd('Chargement livres');
         
-        // ✅ NOUVEAU : Calculer le nombre total de pages
-        totalItems = stats.total;
-        totalPages = Math.ceil(totalItems / itemsPerPage);
+        // ✅ Calculer la pagination
+        totalItems = stats.total || 0;
+        totalPages = itemsPerPage >= 1000 ? 1 : Math.ceil(totalItems / itemsPerPage);
         
-        // ✅ Afficher les informations de pagination
         renderPaginationInfo(books.length);
         
         let html = '';
         if (!isWishlist && stats) {
-            html += `<div class="stats"><p>Total livres : <strong>${stats.total}</strong></p></div>`;
+            html += `
+                <div class="stats-bar">
+                    <span><strong>${stats.total}</strong> livres</span>
+                    <span>📚 J: <strong>${stats.mes_livres}</strong></span>
+                    <span>📚 K: <strong>${stats.livres_k}</strong></span>
+                    <span>📖 À lire: <strong>${stats.a_lire}</strong></span>
+                    <span>📚 En cours: <strong>${stats.en_cours}</strong></span>
+                    <span>✅ Lus: <strong>${stats.lus}</strong></span>
+                    ${stats.note_moyenne ? `<span>⭐ Moyenne: <strong>${stats.note_moyenne}/5</strong></span>` : ''}
+                </div>
+            `;
         } else if (isWishlist && stats) {
-            html += `<div class="stats"><p>Total dans la wishlist : <strong>${stats.total}</strong></p></div>`;
+            html += `
+                <div class="stats-bar">
+                    <span><strong>${stats.total}</strong> souhaits</span>
+                    <span>💖 J: <strong>${stats.mes_souhaits}</strong></span>
+                    <span>💖 K: <strong>${stats.souhaits_k}</strong></span>
+                </div>
+            `;
         }
 
         if (books.length === 0) {
-            html += `<p>Aucun livre trouvé dans ${isWishlist ? 'la wishlist' : 'la collection'} avec ces critères.</p>`;
+            html += `
+                <div class="empty-state">
+                    <i class="fas fa-book-open fa-3x"></i>
+                    <p>Aucun livre trouvé ${searchQuery ? 'avec ces critères de recherche' : 'dans ' + (isWishlist ? 'la wishlist' : 'cette catégorie')}</p>
+                    ${searchQuery ? '<button onclick="document.getElementById(\'searchQuery\').value=\'\'; fetchAndRenderBooks(' + isWishlist + ')">Effacer la recherche</button>' : ''}
+                </div>
+            `;
         } else {
             html += `
                 <div class="book-table-container">
                     <table class="book-table">
                         <thead>
                             <tr>
-                                <th class="sortable ${currentSortColumn === 'titre' ? currentSortDirection : ''}" data-sort="titre">Titre <span class="sort-icon"></span></th>
-                                <th class="sortable ${currentSortColumn === 'auteur' ? currentSortDirection : ''}" data-sort="auteur">Auteur <span class="sort-icon"></span></th>
-                                <th class="sortable ${currentSortColumn === 'proprietaire' ? currentSortDirection : ''}" data-sort="proprietaire">Propriétaire <span class="sort-icon"></span></th>
-                                ${!isWishlist ? `<th class="sortable ${currentSortColumn === 'note' ? currentSortDirection : ''}" data-sort="note">Note <span class="sort-icon"></span></th>` : ''}
-                                ${!isWishlist ? `<th class="sortable ${currentSortColumn === 'statut_lecture' ? currentSortDirection : ''}" data-sort="statut_lecture">Statut <span class="sort-icon"></span></th>` : ''}
+                                <th class="sortable ${currentSortColumn === 'titre' ? currentSortDirection : ''}" data-sort="titre">
+                                    Titre <span class="sort-icon">${getSortIcon('titre')}</span>
+                                </th>
+                                <th class="sortable ${currentSortColumn === 'auteur' ? currentSortDirection : ''}" data-sort="auteur">
+                                    Auteur <span class="sort-icon">${getSortIcon('auteur')}</span>
+                                </th>
+                                <th class="sortable ${currentSortColumn === 'proprietaire' ? currentSortDirection : ''}" data-sort="proprietaire">
+                                    Propriétaire <span class="sort-icon">${getSortIcon('proprietaire')}</span>
+                                </th>
+                                ${!isWishlist ? `<th class="sortable ${currentSortColumn === 'note' ? currentSortDirection : ''}" data-sort="note">Note <span class="sort-icon">${getSortIcon('note')}</span></th>` : ''}
+                                ${!isWishlist ? `<th class="sortable ${currentSortColumn === 'statut_lecture' ? currentSortDirection : ''}" data-sort="statut_lecture">Statut <span class="sort-icon">${getSortIcon('statut_lecture')}</span></th>` : ''}
                                 <th class="actions-cell">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
             `;
+            
             books.forEach(book => {
+                const noteStars = !isWishlist && book.note ? '⭐'.repeat(book.note) : '';
                 html += `
                     <tr>
-                        <td>${book.titre}</td>
-                        <td>${book.auteur}</td>
-                        <td>${book.proprietaire}</td>
-                        ${!isWishlist ? `<td>${book.note || 'N/A'}/5</td>` : ''}
-                        ${!isWishlist ? `<td>${book.statut_lecture}</td>` : ''}
+                        <td class="book-title">${escapeHtml(book.titre)}</td>
+                        <td>${escapeHtml(book.auteur)}</td>
+                        <td><span class="badge">${book.proprietaire}</span></td>
+                        ${!isWishlist ? `<td>${noteStars} ${book.note || 0}/5</td>` : ''}
+                        ${!isWishlist ? `<td><span class="status-badge status-${book.statut_lecture}">${formatStatut(book.statut_lecture)}</span></td>` : ''}
                         <td class="actions-cell">
-                            <button onclick="showPage('addBook', { bookId: ${book.id}, isWishlist: ${isWishlist} })">Modifier</button>
-                            ${isWishlist ? `<button onclick="moveToCollection(${book.id})">À la collection</button>` : ''}
-                            <button class="delete-btn" onclick="deleteBook(${book.id}, ${isWishlist})">Supprimer</button>
+                            <button class="btn-edit" onclick="showPage('addBook', { bookId: ${book.id}, isWishlist: ${isWishlist} })" title="Modifier">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            ${isWishlist ? `
+                            <button class="btn-move" onclick="moveToCollection(${book.id})" title="Vers la collection">
+                                <i class="fas fa-arrow-right"></i>
+                            </button>` : ''}
+                            <button class="btn-delete" onclick="deleteBook(${book.id}, ${isWishlist})" title="Supprimer">
+                                <i class="fas fa-trash"></i>
+                            </button>
                         </td>
                     </tr>
                 `;
             });
+            
             html += `
                         </tbody>
                     </table>
                 </div>
             `;
         }
+        
         bookListContent.innerHTML = html;
-
-        // ✅ Afficher les contrôles de pagination
         renderPaginationControls(isWishlist);
 
-        // Ajouter les écouteurs pour le tri
+        // ✅ Événements de tri
         document.querySelectorAll('.book-table th.sortable').forEach(header => {
             header.addEventListener('click', () => {
                 const column = header.dataset.sort;
@@ -471,34 +623,76 @@ async function fetchAndRenderBooks(isWishlist) {
                     currentSortColumn = column;
                     currentSortDirection = 'asc';
                 }
-                currentPage = 1; // Retour à la page 1 lors d'un nouveau tri
+                currentPage = 1;
                 fetchAndRenderBooks(isWishlist);
             });
         });
 
     } catch (error) {
-        bookListContent.innerHTML = `<p style="color: red;">Erreur lors du chargement des livres: ${error.message}</p>`;
+        bookListContent.innerHTML = `
+            <div class="error-message">
+                <i class="fas fa-exclamation-triangle"></i>
+                <p>Erreur lors du chargement des livres</p>
+                <small>${error.message}</small>
+                <button onclick="fetchAndRenderBooks(${isWishlist})" style="margin-top: 10px;">
+                    <i class="fas fa-redo"></i> Réessayer
+                </button>
+            </div>
+        `;
     }
 }
 
-// ✅ NOUVEAU : Afficher les informations de pagination
+// ✅ NOUVEAU : Formater le statut
+function formatStatut(statut) {
+    const statuts = {
+        'a_lire': 'À lire',
+        'en_cours': 'En cours',
+        'lu': 'Lu'
+    };
+    return statuts[statut] || statut;
+}
+
+// ✅ NOUVEAU : Icône de tri
+function getSortIcon(column) {
+    if (currentSortColumn !== column) return '⇅';
+    return currentSortDirection === 'asc' ? '↑' : '↓';
+}
+
+// ✅ NOUVEAU : Échapper le HTML pour éviter les XSS
+function escapeHtml(text) {
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    };
+    return text.replace(/[&<>"']/g, m => map[m]);
+}
+
+// ✅ Afficher les informations de pagination
 function renderPaginationInfo(currentPageItems) {
     const paginationInfo = document.getElementById('paginationInfo');
     if (!paginationInfo) return;
+    
+    if (totalItems === 0) {
+        paginationInfo.innerHTML = '';
+        return;
+    }
     
     const startItem = (currentPage - 1) * itemsPerPage + 1;
     const endItem = Math.min(startItem + currentPageItems - 1, totalItems);
     
     paginationInfo.innerHTML = `
         <p class="pagination-text">
-            Affichage de <strong>${startItem}</strong> à <strong>${endItem}</strong> 
+            📊 Affichage de <strong>${startItem}</strong> à <strong>${endItem}</strong> 
             sur <strong>${totalItems}</strong> livres
-            ${totalPages > 1 ? `(Page ${currentPage} sur ${totalPages})` : ''}
+            ${totalPages > 1 ? ` • Page <strong>${currentPage}</strong> sur <strong>${totalPages}</strong>` : ''}
         </p>
     `;
 }
 
-// ✅ NOUVEAU : Afficher les contrôles de pagination
+// ✅ Afficher les contrôles de pagination
 function renderPaginationControls(isWishlist) {
     const paginationControls = document.getElementById('paginationControls');
     if (!paginationControls) return;
@@ -510,17 +704,14 @@ function renderPaginationControls(isWishlist) {
     
     let html = '<div class="pagination-buttons">';
     
-    // Bouton "Première page"
-    html += `<button onclick="goToPage(1, ${isWishlist})" ${currentPage === 1 ? 'disabled' : ''}>
-                <i class="fas fa-angle-double-left"></i> Première
+    html += `<button onclick="goToPage(1, ${isWishlist})" ${currentPage === 1 ? 'disabled' : ''} title="Première page">
+                <i class="fas fa-angle-double-left"></i>
              </button>`;
     
-    // Bouton "Page précédente"
-    html += `<button onclick="goToPage(${currentPage - 1}, ${isWishlist})" ${currentPage === 1 ? 'disabled' : ''}>
-                <i class="fas fa-angle-left"></i> Précédent
+    html += `<button onclick="goToPage(${currentPage - 1}, ${isWishlist})" ${currentPage === 1 ? 'disabled' : ''} title="Page précédente">
+                <i class="fas fa-angle-left"></i>
              </button>`;
     
-    // Numéros de pages (logique intelligente)
     const pageNumbers = getPageNumbers(currentPage, totalPages);
     pageNumbers.forEach(pageNum => {
         if (pageNum === '...') {
@@ -533,34 +724,31 @@ function renderPaginationControls(isWishlist) {
         }
     });
     
-    // Bouton "Page suivante"
-    html += `<button onclick="goToPage(${currentPage + 1}, ${isWishlist})" ${currentPage === totalPages ? 'disabled' : ''}>
-                Suivant <i class="fas fa-angle-right"></i>
+    html += `<button onclick="goToPage(${currentPage + 1}, ${isWishlist})" ${currentPage === totalPages ? 'disabled' : ''} title="Page suivante">
+                <i class="fas fa-angle-right"></i>
              </button>`;
     
-    // Bouton "Dernière page"
-    html += `<button onclick="goToPage(${totalPages}, ${isWishlist})" ${currentPage === totalPages ? 'disabled' : ''}>
-                Dernière <i class="fas fa-angle-double-right"></i>
+    html += `<button onclick="goToPage(${totalPages}, ${isWishlist})" ${currentPage === totalPages ? 'disabled' : ''} title="Dernière page">
+                <i class="fas fa-angle-double-right"></i>
              </button>`;
     
     html += '</div>';
     
-    // ✅ Aller directement à une page
     html += `
         <div class="pagination-goto">
-            <label for="gotoPage">Aller à la page :</label>
+            <label for="gotoPage">Aller à :</label>
             <input type="number" id="gotoPage" min="1" max="${totalPages}" value="${currentPage}" 
                    onkeypress="if(event.key === 'Enter') goToPageInput(${isWishlist})">
-            <button onclick="goToPageInput(${isWishlist})">Go</button>
+            <button onclick="goToPageInput(${isWishlist})">OK</button>
         </div>
     `;
     
     paginationControls.innerHTML = html;
 }
 
-// ✅ NOUVEAU : Calculer les numéros de pages à afficher
+// ✅ Calculer les numéros de pages à afficher
 function getPageNumbers(current, total) {
-    const delta = 2; // Nombre de pages à afficher avant/après la page actuelle
+    const delta = 2;
     const range = [];
     const rangeWithDots = [];
     let l;
@@ -586,17 +774,15 @@ function getPageNumbers(current, total) {
     return rangeWithDots;
 }
 
-// ✅ NOUVEAU : Fonction pour changer de page
+// ✅ Fonction pour changer de page
 function goToPage(pageNum, isWishlist) {
     if (pageNum < 1 || pageNum > totalPages || pageNum === currentPage) return;
     currentPage = pageNum;
     fetchAndRenderBooks(isWishlist);
-    
-    // Scroll en haut de la page
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-// ✅ NOUVEAU : Aller à une page via l'input
+// ✅ Aller à une page via l'input
 function goToPageInput(isWishlist) {
     const input = document.getElementById('gotoPage');
     const pageNum = parseInt(input.value);
@@ -604,7 +790,7 @@ function goToPageInput(isWishlist) {
     if (pageNum >= 1 && pageNum <= totalPages) {
         goToPage(pageNum, isWishlist);
     } else {
-        showAlert(`Veuillez entrer un numéro de page entre 1 et ${totalPages}`, 'error', 2000);
+        showAlert(`Veuillez entrer un numéro entre 1 et ${totalPages}`, 'error', 2000);
         input.value = currentPage;
     }
 }
@@ -614,16 +800,19 @@ async function renderAddEditBookForm(data = {}) {
     const bookId = data.bookId;
     const isWishlistEdit = data.isWishlist || false;
     let book = {};
-    let formTitle = 'Ajouter un Nouveau Livre';
+    let formTitle = '➕ Ajouter un Nouveau Livre';
     let isEditing = false;
     
     if (bookId) {
         isEditing = true;
+        showLoader('Chargement du livre...');
         try {
             book = await callApi(isWishlistEdit ? `/wishlist/${bookId}` : `/books/${bookId}`);
-            formTitle = `Modifier le Livre: "${book.titre}"`;
+            formTitle = `✏ Modifier : "${book.titre}"`;
+            hideLoader();
         } catch (error) {
-            showAlert(`Impossible de charger les détails du livre pour modification: ${error.message}`, 'error');
+            hideLoader();
+            showAlert(`Impossible de charger le livre: ${error.message}`, 'error');
             return;
         }
     }
@@ -636,38 +825,59 @@ async function renderAddEditBookForm(data = {}) {
                 <input type="hidden" id="isEditing" value="${isEditing}">
                 <input type="hidden" id="isWishlistEdit" value="${isWishlistEdit}">
 
-                <label for="titre">Titre:</label>
-                <input type="text" id="titre" name="titre" value="${book.titre || ''}" required><br>
+                <div class="form-group">
+                    <label for="titre">📖 Titre <span class="required">*</span></label>
+                    <input type="text" id="titre" name="titre" value="${escapeHtml(book.titre || '')}" required>
+                </div>
 
-                <label for="auteur">Auteur:</label>
-                <input type="text" id="auteur" name="auteur" value="${book.auteur || ''}" required><br>
+                <div class="form-group">
+                    <label for="auteur">✍ Auteur <span class="required">*</span></label>
+                    <input type="text" id="auteur" name="auteur" value="${escapeHtml(book.auteur || '')}" required>
+                </div>
 
                 ${!isWishlistEdit ? `
-                <label for="note">Note (0-5):</label>
-                <input type="number" id="note" name="note" min="0" max="5" value="${book.note || 0}"><br>
+                <div class="form-group">
+                    <label for="note">⭐ Note (0-5)</label>
+                    <input type="number" id="note" name="note" min="0" max="5" value="${book.note || 0}">
+                </div>
                 ` : ''}
 
-                <label for="proprietaire">Propriétaire:</label>
-                <select id="proprietaire" name="proprietaire">
-                    <option value="J" ${book.proprietaire === 'J' ? 'selected' : ''}>J</option>
-                    <option value="K" ${book.proprietaire === 'K' ? 'selected' : ''}>K</option>
-                </select><br>
+                <div class="form-group">
+                    <label for="proprietaire">👤 Propriétaire</label>
+                    <select id="proprietaire" name="proprietaire">
+                        <option value="J" ${book.proprietaire === 'J' ? 'selected' : ''}>J</option>
+                        <option value="K" ${book.proprietaire === 'K' ? 'selected' : ''}>K</option>
+                    </select>
+                </div>
 
                 ${!isWishlistEdit ? `
-                <label for="statut_lecture">Statut de lecture:</label>
-                <select id="statut_lecture" name="statut_lecture">
-                    <option value="lu" ${book.statut_lecture === 'lu' ? 'selected' : ''}>Lu</option>
-                    <option value="a_lire" ${book.statut_lecture === 'a_lire' ? 'selected' : ''}>À lire</option>
-                    <option value="en_cours" ${book.statut_lecture === 'en_cours' ? 'selected' : ''}>En cours</option>
-                </select><br>
+                <div class="form-group">
+                    <label for="statut_lecture">📚 Statut de lecture</label>
+                    <select id="statut_lecture" name="statut_lecture">
+                        <option value="lu" ${book.statut_lecture === 'lu' ? 'selected' : ''}>Lu</option>
+                        <option value="a_lire" ${book.statut_lecture === 'a_lire' ? 'selected' : ''}>À lire</option>
+                        <option value="en_cours" ${book.statut_lecture === 'en_cours' ? 'selected' : ''}>En cours</option>
+                    </select>
+                </div>
                 ` : ''}
                 
                 ${!isEditing ? `
-                <label for="est_wishlist">Ajouter à la wishlist:</label>
-                <input type="checkbox" id="est_wishlist" name="est_wishlist" ${book.est_wishlist ? 'checked' : ''}><br>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="est_wishlist" name="est_wishlist" ${book.est_wishlist ? 'checked' : ''}>
+                        💖 Ajouter à la wishlist
+                    </label>
+                </div>
                 ` : ''}
 
-                <button type="submit">${isEditing ? 'Modifier le Livre' : 'Ajouter le Livre'}</button>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">
+                        <i class="fas fa-save"></i> ${isEditing ? 'Modifier' : 'Ajouter'}
+                    </button>
+                    <button type="button" class="btn-secondary" onclick="showPage(${isWishlistEdit ? '\'wishlist\', {isWishlist: true}' : '\'collection\', {isWishlist: false}'})">
+                        <i class="fas fa-times"></i> Annuler
+                    </button>
+                </div>
             </form>
         </div>
     `;
@@ -684,13 +894,13 @@ async function handleAddEditBookSubmit(event) {
 
     const formData = new FormData(event.target);
     const bookData = {
-        titre: formData.get('titre'),
-        auteur: formData.get('auteur'),
+        titre: formData.get('titre').trim(),
+        auteur: formData.get('auteur').trim(),
         proprietaire: formData.get('proprietaire')
     };
 
     if (!isWishlistEdit) {
-        bookData.note = parseInt(formData.get('note'));
+        bookData.note = parseInt(formData.get('note')) || 0;
         bookData.statut_lecture = formData.get('statut_lecture');
     }
 
@@ -701,17 +911,20 @@ async function handleAddEditBookSubmit(event) {
     if (isEditing) {
         endpoint = isWishlistEdit ? `/wishlist/${bookId}` : `/books/${bookId}`;
         method = 'PUT';
-        successMessage = 'Livre modifié avec succès !';
+        successMessage = '✅ Livre modifié avec succès !';
     } else {
         bookData.est_wishlist = formData.get('est_wishlist') === 'on' ? 1 : 0;
         endpoint = bookData.est_wishlist ? '/wishlist' : '/books';
         method = 'POST';
-        successMessage = 'Livre ajouté avec succès !';
+        successMessage = '✅ Livre ajouté avec succès !';
     }
+
+    showLoader(isEditing ? 'Modification en cours...' : 'Ajout en cours...');
 
     try {
         await callApi(endpoint, method, bookData);
         clearCache();
+        hideLoader();
         showAlert(successMessage, 'success');
         
         setTimeout(() => {
@@ -722,20 +935,24 @@ async function handleAddEditBookSubmit(event) {
             }
         }, 300);
     } catch (error) {
+        hideLoader();
         // Erreur déjà gérée
     }
 }
 
 async function deleteBook(bookId, isWishlist) {
-    if (!confirm('Êtes-vous sûr de vouloir supprimer ce livre ?')) {
+    if (!confirm('⚠ Êtes-vous sûr de vouloir supprimer ce livre ?')) {
         return;
     }
+
+    showLoader('Suppression en cours...');
 
     try {
         const endpoint = isWishlist ? `/wishlist/${bookId}` : `/books/${bookId}`;
         const response = await callApi(endpoint, 'DELETE');
         clearCache();
-        showAlert(response.message, 'info');
+        hideLoader();
+        showAlert(response.message, 'success');
         
         setTimeout(() => {
             if (isWishlist) {
@@ -745,30 +962,36 @@ async function deleteBook(bookId, isWishlist) {
             }
         }, 300);
     } catch (error) {
+        hideLoader();
         // Erreur déjà gérée
     }
 }
 
 async function moveToCollection(bookId) {
-    if (!confirm('Voulez-vous déplacer ce livre vers votre collection ?')) {
+    if (!confirm('📚 Déplacer ce livre vers votre collection ?')) {
         return;
     }
+    
+    showLoader('Déplacement en cours...');
+    
     try {
         const response = await callApi(`/wishlist/${bookId}/move_to_collection`, 'POST');
         clearCache();
+        hideLoader();
         showAlert(response.message, 'success');
         
         setTimeout(() => {
             showPage('wishlist', { isWishlist: true });
         }, 300);
     } catch (error) {
+        hideLoader();
         // Erreur déjà gérée
     }
 }
 
 // --- Initialisation ---
 document.addEventListener('DOMContentLoaded', () => {
-    console.time('Initialisation totale');
+    console.time('⏱ Initialisation totale');
     
     if (currentApiKey) {
         renderNavigation();
@@ -777,5 +1000,5 @@ document.addEventListener('DOMContentLoaded', () => {
         showPage('login');
     }
     
-    console.timeEnd('Initialisation totale');
+    console.timeEnd('⏱ Initialisation totale');
 });
