@@ -41,17 +41,17 @@
           crossorigin="anonymous" referrerpolicy="no-referrer">
     
     <!-- ✅ Configuration de l'API -->
-    <script>
-        // ✅ Centralisez l'URL de l'API ici pour faciliter la maintenance
-        const API_CONFIG = {
-            BASE_URL: 'https://VOTRE-NOM-SERVICE.onrender.com/api/v1',
-            HEALTH_CHECK_INTERVAL: 60000 // 60 secondes
-        };
-    </script>
+<script>
+    const API_CONFIG = {
+        BASE_URL: 'https://ma-bibliotheque-api.onrender.com/api/v1',
+        HEALTH_CHECK_INTERVAL: 60000,
+        CACHE_DURATION: 60000
+    };
+</script>
     
     <!-- ✅ Preconnect pour optimiser les performances -->
-    <link rel="preconnect" href="https://VOTRE-NOM-SERVICE.onrender.com">
-    <link rel="dns-prefetch" href="https://VOTRE-NOM-SERVICE.onrender.com">
+    <link rel="preconnect" href="https://ma-bibliotheque-api.onrender.com">
+    <link rel="dns-prefetch" href="https://ma-bibliotheque-api.onrender.com">
 </head>
 <body>
     <!-- Header avec navigation -->

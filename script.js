@@ -4,8 +4,8 @@
 // ✅ Utilise API_CONFIG défini dans index.html, sinon fallback
 const API_BASE_URL = typeof API_CONFIG !== 'undefined' 
     ? API_CONFIG.BASE_URL 
-    : 'https://VOTRE-NOM-SERVICE.onrender.com/api/v1';
-
+    : 'https://ma-bibliotheque-api.onrender.com/api/v1';
+    
 const API_KEY_STORAGE_KEY = 'library_api_key';
 
 let currentApiKey = localStorage.getItem(API_KEY_STORAGE_KEY);
