@@ -516,3 +516,167 @@ h2 {
 .alert-message.visible {
     opacity: 1;
 }
+/* ===== PAGINATION STYLES ===== */
+
+.pagination-info {
+    text-align: center;
+    margin: 20px 0;
+    padding: 10px;
+    background: linear-gradient(135deg, #D4D9F0 0%, #6C8BE0 20%);
+    border-radius: 10px;
+}
+
+.pagination-text {
+    margin: 0;
+    font-size: 16px;
+    color: #2649B2;
+    font-weight: 500;
+}
+
+.pagination-controls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+    margin: 30px 0;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 15px;
+}
+
+.pagination-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    align-items: center;
+}
+
+.pagination-buttons button {
+    padding: 10px 16px;
+    background: white;
+    border: 2px solid #4A74F3;
+    color: #4A74F3;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    min-width: 45px;
+}
+
+.pagination-buttons button:hover:not(:disabled) {
+    background: #4A74F3;
+    color: white;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(74, 116, 243, 0.3);
+}
+
+.pagination-buttons button.active {
+    background: #2649B2;
+    color: white;
+    border-color: #2649B2;
+    font-weight: bold;
+}
+
+.pagination-buttons button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    background: #e9ecef;
+    border-color: #dee2e6;
+    color: #6c757d;
+}
+
+.pagination-ellipsis {
+    padding: 10px 8px;
+    color: #6c757d;
+    font-weight: bold;
+}
+
+.pagination-goto {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: white;
+    padding: 12px 20px;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.pagination-goto label {
+    font-weight: 500;
+    color: #2649B2;
+    white-space: nowrap;
+}
+
+.pagination-goto input {
+    width: 70px;
+    padding: 8px;
+    border: 2px solid #4A74F3;
+    border-radius: 6px;
+    text-align: center;
+    font-size: 14px;
+}
+
+.pagination-goto input:focus {
+    outline: none;
+    border-color: #2649B2;
+    box-shadow: 0 0 0 3px rgba(74, 116, 243, 0.2);
+}
+
+.pagination-goto button {
+    padding: 8px 20px;
+    background: #8E7DE3;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.3s;
+}
+
+.pagination-goto button:hover {
+    background: #9D5CE6;
+    transform: translateY(-1px);
+}
+
+/* Responsive pour mobile */
+@media (max-width: 768px) {
+    .pagination-buttons button {
+        padding: 8px 12px;
+        font-size: 12px;
+        min-width: 38px;
+    }
+    
+    .pagination-goto {
+        flex-direction: column;
+        text-align: center;
+    }
+    
+    .pagination-goto input {
+        width: 100%;
+    }
+}
+
+/* Style pour le sélecteur d'éléments par page */
+#itemsPerPageSelect {
+    padding: 8px 12px;
+    border: 2px solid #4A74F3;
+    border-radius: 8px;
+    background: white;
+    color: #2649B2;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+#itemsPerPageSelect:hover {
+    border-color: #2649B2;
+    box-shadow: 0 2px 8px rgba(74, 116, 243, 0.2);
+}
+
+#itemsPerPageSelect:focus {
+    outline: none;
+    border-color: #2649B2;
+    box-shadow: 0 0 0 3px rgba(74, 116, 243, 0.2);
+}

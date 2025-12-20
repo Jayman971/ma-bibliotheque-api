@@ -1,20 +1,29 @@
-// script.js
+// script.js - VERSION AVEC PAGINATION
 
 // --- Configuration de l'API ---
 const API_BASE_URL = 'https://ma-bibliotheque-api.onrender.com/api/v1';
-const API_KEY_STORAGE_KEY = 'library_api_key'; // Clé pour stocker l'API Key dans localStorage
+const API_KEY_STORAGE_KEY = 'library_api_key';
 
-let currentApiKey = localStorage.getItem(API_KEY_STORAGE_KEY); // Tente de récupérer la clé au démarrage
-let currentSortColumn = 'titre'; // Colonne de tri par défaut
-let currentSortDirection = 'asc'; // Direction de tri par défaut
+let currentApiKey = localStorage.getItem(API_KEY_STORAGE_KEY);
+let currentSortColumn = 'titre';
+let currentSortDirection = 'asc';
+
+// ✅ NOUVEAU : Variables de pagination
+let currentPage = 1;
+let itemsPerPage = 50; // Nombre de livres par page (modifiable)
+let totalItems = 0;
+let totalPages = 0;
 
 // --- Éléments du DOM ---
 const appContainer = document.getElementById('app-container');
 const mainNav = document.getElementById('mainNav');
 
+// --- Système de cache ---
+const apiCache = new Map();
+const CACHE_DURATION = 30000;
+
 // --- Fonctions utilitaires ---
 
-// Affiche un message d'alerte temporaire
 function showAlert(message, type = 'success', duration = 3000) {
     let alertDiv = document.querySelector('.alert-message');
     if (!alertDiv) {
@@ -31,8 +40,7 @@ function showAlert(message, type = 'success', duration = 3000) {
     }, duration);
 }
 
-// Effectue une requête à l'API Flask
-async function callApi(endpoint, method = 'GET', data = null, needsAuth = true) {
+async function callApi(endpoint, method = 'GET', data = null, needsAuth = true, useCache = false) {
     const headers = {
         'Content-Type': 'application/json'
     };
@@ -46,6 +54,20 @@ async function callApi(endpoint, method = 'GET', data = null, needsAuth = true) 
         headers['Authorization'] = `Bearer ${currentApiKey}`;
     }
 
+    let finalEndpoint = endpoint;
+    if (method === 'GET') {
+        const separator = endpoint.includes('?') ? '&' : '?';
+        finalEndpoint = `${endpoint}${separator}_t=${Date.now()}`;
+        
+        if (useCache) {
+            const cached = apiCache.get(endpoint);
+            if (cached && (Date.now() - cached.timestamp < CACHE_DURATION)) {
+                console.log('📦 Utilisation du cache pour:', endpoint);
+                return cached.data;
+            }
+        }
+    }
+
     const options = {
         method: method,
         headers: headers,
@@ -56,22 +78,44 @@ async function callApi(endpoint, method = 'GET', data = null, needsAuth = true) 
     }
 
     try {
-        const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
-        if (response.status === 401) { // Unauthorized
+        console.time(`API ${method} ${endpoint}`);
+        const response = await fetch(`${API_BASE_URL}${finalEndpoint}`, options);
+        console.timeEnd(`API ${method} ${endpoint}`);
+        
+        if (response.status === 401) {
             showAlert('Session expirée ou non valide. Veuillez vous reconnecter.', 'error');
-            logout(); // Force la déconnexion
+            logout();
             return;
         }
         if (!response.ok) {
             const errorData = await response.json();
             throw new Error(errorData.message || `Erreur HTTP: ${response.status}`);
         }
-        return await response.json();
+        
+        const result = await response.json();
+        
+        if (method === 'GET' && useCache) {
+            apiCache.set(endpoint, {
+                data: result,
+                timestamp: Date.now()
+            });
+        }
+        
+        if (method === 'POST' || method === 'PUT' || method === 'DELETE') {
+            clearCache();
+        }
+        
+        return result;
     } catch (error) {
         console.error("Erreur d'appel API:", error);
         showAlert(`Erreur API : ${error.message}`, 'error');
         throw error;
     }
+}
+
+function clearCache() {
+    apiCache.clear();
+    console.log('🗑 Cache vidé');
 }
 
 // --- Système de routage/pages ---
@@ -88,14 +132,16 @@ function showPage(pageName, data = {}) {
         renderLoginPage();
         return;
     }
-    // Mise à jour de l'état actif des boutons de navigation
+    
+    // ✅ NOUVEAU : Réinitialiser la pagination lors du changement de page
+    currentPage = 1;
+    
     document.querySelectorAll('#mainNav button').forEach(btn => btn.classList.remove('active'));
     const currentButton = document.getElementById(`${pageName}Btn`);
     if (currentButton) {
         currentButton.classList.add('active');
     }
 
-    // Nettoyer l'app-container des messages d'alerte précédents (sauf si c'est pour un nouveau message)
     const existingAlert = document.querySelector('.alert-message');
     if (existingAlert) {
         existingAlert.remove();
@@ -127,7 +173,7 @@ function renderNavigation() {
 
 // --- Page de connexion ---
 function renderLoginPage() {
-    mainNav.innerHTML = ''; // Cacher la navigation principale
+    mainNav.innerHTML = '';
     appContainer.innerHTML = `
         <div class="login-container">
             <h2>Connexion à la Bibliothèque</h2>
@@ -153,20 +199,21 @@ async function handleLogin(event) {
     const password = document.getElementById('password').value;
 
     try {
-        const response = await callApi('/login', 'POST', { username, password }, false); // Pas d'auth pour le login
+        const response = await callApi('/login', 'POST', { username, password }, false);
         currentApiKey = response.api_key;
         localStorage.setItem(API_KEY_STORAGE_KEY, currentApiKey);
         showAlert('Connexion réussie !', 'success');
-        renderNavigation(); // Afficher la navigation après connexion
-        showPage('home'); // Rediriger vers la page d'accueil
+        renderNavigation();
+        showPage('home');
     } catch (error) {
-        // showAlert est déjà appelé par callApi en cas d'erreur
+        // Erreur déjà gérée
     }
 }
 
 function logout() {
     currentApiKey = null;
     localStorage.removeItem(API_KEY_STORAGE_KEY);
+    clearCache();
     showAlert('Vous avez été déconnecté.', 'info');
     showPage('login');
 }
@@ -175,12 +222,14 @@ function logout() {
 async function renderHomePage() {
     appContainer.innerHTML = '<div class="homepage"><h2>Bienvenue dans votre Bibliothèque !</h2><p class="tagline">Organisez, découvrez, et partagez vos lectures préférées.</p><div id="homeStats" class="welcome-stats">Chargement des statistiques...</div></div>';
     
+    console.time('Chargement stats');
+    
     try {
-        const collectionResponse = await callApi('/books'); 
-        const wishlistResponse = await callApi('/wishlist'); 
-
-        const collectionStats = collectionResponse.stats;
-        const wishlistStats = wishlistResponse.stats;
+        // ✅ Utilisation de l'endpoint /stats optimisé
+        const stats = await callApi('/stats', 'GET', null, true, true);
+        
+        const collectionStats = stats.collection;
+        const wishlistStats = stats.wishlist;
 
         const homeStatsDiv = document.getElementById('homeStats');
         homeStatsDiv.innerHTML = `
@@ -210,13 +259,14 @@ async function renderHomePage() {
                 <p>${wishlistStats.total}</p>
             </div>
         `;
+        
+        console.timeEnd('Chargement stats');
     } catch (error) {
         document.getElementById('homeStats').innerHTML = `<p style="color: red;">Impossible de charger les statistiques : ${error.message}</p>`;
     }
 }
 
-
-// --- Page de liste de livres (Collection/Wishlist) ---
+// --- Page de liste de livres avec PAGINATION ---
 async function renderBookListPage(data) {
     const isWishlist = data.isWishlist;
     const pageTitle = isWishlist ? 'Ma Wishlist' : 'Ma Collection de Livres';
@@ -254,22 +304,64 @@ async function renderBookListPage(data) {
                     <option value="lu">Lu</option>
                 </select>
             </div>` : ''}
+            
+            <!-- ✅ NOUVEAU : Sélecteur d'éléments par page -->
+            <div>
+                <label for="itemsPerPageSelect">Livres par page:</label>
+                <select id="itemsPerPageSelect">
+                    <option value="10">10</option>
+                    <option value="25">25</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                    <option value="1000">Tous</option>
+                </select>
+            </div>
+            
             <div>
                 <button id="applyFiltersBtn">Appliquer les filtres</button>
+                <button id="refreshBtn" style="margin-left: 10px;">🔄 Rafraîchir</button>
             </div>
         </div>
+        
+        <!-- ✅ NOUVEAU : Informations de pagination en haut -->
+        <div id="paginationInfo" class="pagination-info"></div>
+        
         <div id="bookListContent">Chargement des livres...</div>
+        
+        <!-- ✅ NOUVEAU : Contrôles de pagination en bas -->
+        <div id="paginationControls" class="pagination-controls"></div>
     `;
 
-    document.getElementById('applyFiltersBtn').addEventListener('click', () => fetchAndRenderBooks(isWishlist));
+    document.getElementById('applyFiltersBtn').addEventListener('click', () => {
+        currentPage = 1; // Réinitialiser à la page 1 lors d'une nouvelle recherche
+        fetchAndRenderBooks(isWishlist);
+    });
+    
+    document.getElementById('refreshBtn').addEventListener('click', () => {
+        clearCache();
+        fetchAndRenderBooks(isWishlist);
+        showAlert('Données rafraîchies !', 'info', 1500);
+    });
+    
+    // ✅ NOUVEAU : Changement du nombre d'éléments par page
+    document.getElementById('itemsPerPageSelect').addEventListener('change', (e) => {
+        itemsPerPage = parseInt(e.target.value);
+        currentPage = 1; // Retour à la page 1
+        fetchAndRenderBooks(isWishlist);
+    });
+    
     document.getElementById('searchQuery').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') fetchAndRenderBooks(isWishlist);
+        if (e.key === 'Enter') {
+            currentPage = 1;
+            fetchAndRenderBooks(isWishlist);
+        }
     });
 
     fetchAndRenderBooks(isWishlist);
 }
 
-
+// ✅ OPTIMISÉ : Chargement avec pagination
 async function fetchAndRenderBooks(isWishlist) {
     const bookListContent = document.getElementById('bookListContent');
     bookListContent.innerHTML = '<p>Chargement des livres...</p>';
@@ -290,58 +382,42 @@ async function fetchAndRenderBooks(isWishlist) {
     if (statutFilter) {
         queryString.append('statut', statutFilter);
     }
+    
+    // ✅ NOUVEAU : Paramètres de tri
+    queryString.append('sort_by', currentSortColumn);
+    queryString.append('sort_dir', currentSortDirection);
+    
+    // ✅ NOUVEAU : Paramètres de pagination
+    queryString.append('page', currentPage);
+    queryString.append('per_page', itemsPerPage);
 
     const endpoint = isWishlist ? '/wishlist' : '/books';
+    
+    console.time('Chargement livres');
+    
     try {
         const response = await callApi(`${endpoint}?${queryString.toString()}`);
         let books = isWishlist ? response.wishlist_books : response.books;
-        const stats = response.stats; // Stats restent là mais simplifiées visuellement
+        const stats = response.stats;
 
-        // Tri côté client
-        books.sort((a, b) => {
-            let valA, valB;
-            switch (currentSortColumn) {
-                case 'titre':
-                    valA = a.titre.toLowerCase();
-                    valB = b.titre.toLowerCase();
-                    break;
-                case 'auteur':
-                    valA = a.auteur.toLowerCase();
-                    valB = b.auteur.toLowerCase();
-                    break;
-                case 'note':
-                    valA = a.note || 0;
-                    valB = b.note || 0;
-                    break;
-                case 'proprietaire':
-                    valA = a.proprietaire.toLowerCase();
-                    valB = b.proprietaire.toLowerCase();
-                    break;
-                case 'statut_lecture':
-                    valA = a.statut_lecture ? a.statut_lecture.toLowerCase() : '';
-                    valB = b.statut_lecture ? b.statut_lecture.toLowerCase() : '';
-                    break;
-                default:
-                    valA = a.titre.toLowerCase();
-                    valB = b.titre.toLowerCase();
-            }
-
-            if (valA < valB) return currentSortDirection === 'asc' ? -1 : 1;
-            if (valA > valB) return currentSortDirection === 'asc' ? 1 : -1;
-            return 0;
-        });
-
-
+        console.timeEnd('Chargement livres');
+        
+        // ✅ NOUVEAU : Calculer le nombre total de pages
+        totalItems = stats.total;
+        totalPages = Math.ceil(totalItems / itemsPerPage);
+        
+        // ✅ Afficher les informations de pagination
+        renderPaginationInfo(books.length);
+        
         let html = '';
-        if (!isWishlist && stats) { // Stats simplifiées pour la collection
+        if (!isWishlist && stats) {
             html += `<div class="stats"><p>Total livres : <strong>${stats.total}</strong></p></div>`;
-        } else if (isWishlist && stats) { // Stats simplifiées pour la wishlist
+        } else if (isWishlist && stats) {
             html += `<div class="stats"><p>Total dans la wishlist : <strong>${stats.total}</strong></p></div>`;
         }
 
-
         if (books.length === 0) {
-            html += `<p>Aucun livre trouvé dans ${pageTitle.toLowerCase()} avec ces critères.</p>`;
+            html += `<p>Aucun livre trouvé dans ${isWishlist ? 'la wishlist' : 'la collection'} avec ces critères.</p>`;
         } else {
             html += `
                 <div class="book-table-container">
@@ -382,7 +458,10 @@ async function fetchAndRenderBooks(isWishlist) {
         }
         bookListContent.innerHTML = html;
 
-        // Ajouter les écouteurs d'événements pour le tri après que le tableau est rendu
+        // ✅ Afficher les contrôles de pagination
+        renderPaginationControls(isWishlist);
+
+        // Ajouter les écouteurs pour le tri
         document.querySelectorAll('.book-table th.sortable').forEach(header => {
             header.addEventListener('click', () => {
                 const column = header.dataset.sort;
@@ -392,7 +471,8 @@ async function fetchAndRenderBooks(isWishlist) {
                     currentSortColumn = column;
                     currentSortDirection = 'asc';
                 }
-                fetchAndRenderBooks(isWishlist); // Re-rendre avec le nouveau tri
+                currentPage = 1; // Retour à la page 1 lors d'un nouveau tri
+                fetchAndRenderBooks(isWishlist);
             });
         });
 
@@ -401,8 +481,135 @@ async function fetchAndRenderBooks(isWishlist) {
     }
 }
 
+// ✅ NOUVEAU : Afficher les informations de pagination
+function renderPaginationInfo(currentPageItems) {
+    const paginationInfo = document.getElementById('paginationInfo');
+    if (!paginationInfo) return;
+    
+    const startItem = (currentPage - 1) * itemsPerPage + 1;
+    const endItem = Math.min(startItem + currentPageItems - 1, totalItems);
+    
+    paginationInfo.innerHTML = `
+        <p class="pagination-text">
+            Affichage de <strong>${startItem}</strong> à <strong>${endItem}</strong> 
+            sur <strong>${totalItems}</strong> livres
+            ${totalPages > 1 ? `(Page ${currentPage} sur ${totalPages})` : ''}
+        </p>
+    `;
+}
 
-// --- Formulaire d'ajout/modification (réutilisé) ---
+// ✅ NOUVEAU : Afficher les contrôles de pagination
+function renderPaginationControls(isWishlist) {
+    const paginationControls = document.getElementById('paginationControls');
+    if (!paginationControls) return;
+    
+    if (totalPages <= 1) {
+        paginationControls.innerHTML = '';
+        return;
+    }
+    
+    let html = '<div class="pagination-buttons">';
+    
+    // Bouton "Première page"
+    html += `<button onclick="goToPage(1, ${isWishlist})" ${currentPage === 1 ? 'disabled' : ''}>
+                <i class="fas fa-angle-double-left"></i> Première
+             </button>`;
+    
+    // Bouton "Page précédente"
+    html += `<button onclick="goToPage(${currentPage - 1}, ${isWishlist})" ${currentPage === 1 ? 'disabled' : ''}>
+                <i class="fas fa-angle-left"></i> Précédent
+             </button>`;
+    
+    // Numéros de pages (logique intelligente)
+    const pageNumbers = getPageNumbers(currentPage, totalPages);
+    pageNumbers.forEach(pageNum => {
+        if (pageNum === '...') {
+            html += `<span class="pagination-ellipsis">...</span>`;
+        } else {
+            html += `<button onclick="goToPage(${pageNum}, ${isWishlist})" 
+                            class="${pageNum === currentPage ? 'active' : ''}">
+                        ${pageNum}
+                     </button>`;
+        }
+    });
+    
+    // Bouton "Page suivante"
+    html += `<button onclick="goToPage(${currentPage + 1}, ${isWishlist})" ${currentPage === totalPages ? 'disabled' : ''}>
+                Suivant <i class="fas fa-angle-right"></i>
+             </button>`;
+    
+    // Bouton "Dernière page"
+    html += `<button onclick="goToPage(${totalPages}, ${isWishlist})" ${currentPage === totalPages ? 'disabled' : ''}>
+                Dernière <i class="fas fa-angle-double-right"></i>
+             </button>`;
+    
+    html += '</div>';
+    
+    // ✅ Aller directement à une page
+    html += `
+        <div class="pagination-goto">
+            <label for="gotoPage">Aller à la page :</label>
+            <input type="number" id="gotoPage" min="1" max="${totalPages}" value="${currentPage}" 
+                   onkeypress="if(event.key === 'Enter') goToPageInput(${isWishlist})">
+            <button onclick="goToPageInput(${isWishlist})">Go</button>
+        </div>
+    `;
+    
+    paginationControls.innerHTML = html;
+}
+
+// ✅ NOUVEAU : Calculer les numéros de pages à afficher
+function getPageNumbers(current, total) {
+    const delta = 2; // Nombre de pages à afficher avant/après la page actuelle
+    const range = [];
+    const rangeWithDots = [];
+    let l;
+
+    for (let i = 1; i <= total; i++) {
+        if (i === 1 || i === total || (i >= current - delta && i <= current + delta)) {
+            range.push(i);
+        }
+    }
+
+    for (let i of range) {
+        if (l) {
+            if (i - l === 2) {
+                rangeWithDots.push(l + 1);
+            } else if (i - l !== 1) {
+                rangeWithDots.push('...');
+            }
+        }
+        rangeWithDots.push(i);
+        l = i;
+    }
+
+    return rangeWithDots;
+}
+
+// ✅ NOUVEAU : Fonction pour changer de page
+function goToPage(pageNum, isWishlist) {
+    if (pageNum < 1 || pageNum > totalPages || pageNum === currentPage) return;
+    currentPage = pageNum;
+    fetchAndRenderBooks(isWishlist);
+    
+    // Scroll en haut de la page
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ✅ NOUVEAU : Aller à une page via l'input
+function goToPageInput(isWishlist) {
+    const input = document.getElementById('gotoPage');
+    const pageNum = parseInt(input.value);
+    
+    if (pageNum >= 1 && pageNum <= totalPages) {
+        goToPage(pageNum, isWishlist);
+    } else {
+        showAlert(`Veuillez entrer un numéro de page entre 1 et ${totalPages}`, 'error', 2000);
+        input.value = currentPage;
+    }
+}
+
+// --- Formulaire d'ajout/modification ---
 async function renderAddEditBookForm(data = {}) {
     const bookId = data.bookId;
     const isWishlistEdit = data.isWishlist || false;
@@ -410,11 +617,9 @@ async function renderAddEditBookForm(data = {}) {
     let formTitle = 'Ajouter un Nouveau Livre';
     let isEditing = false;
     
-    // Si un bookId est fourni, c'est une modification
     if (bookId) {
         isEditing = true;
         try {
-            // Utilisation des nouveaux endpoints GET spécifiques à la wishlist ou collection
             book = await callApi(isWishlistEdit ? `/wishlist/${bookId}` : `/books/${bookId}`);
             formTitle = `Modifier le Livre: "${book.titre}"`;
         } catch (error) {
@@ -484,7 +689,7 @@ async function handleAddEditBookSubmit(event) {
         proprietaire: formData.get('proprietaire')
     };
 
-    if (!isWishlistEdit) { // Seulement pour la collection (note, statut)
+    if (!isWishlistEdit) {
         bookData.note = parseInt(formData.get('note'));
         bookData.statut_lecture = formData.get('statut_lecture');
     }
@@ -506,19 +711,21 @@ async function handleAddEditBookSubmit(event) {
 
     try {
         await callApi(endpoint, method, bookData);
+        clearCache();
         showAlert(successMessage, 'success');
-        if (isWishlistEdit || bookData.est_wishlist) {
-            showPage('wishlist', { isWishlist: true });
-        } else {
-            showPage('collection', { isWishlist: false });
-        }
+        
+        setTimeout(() => {
+            if (isWishlistEdit || bookData.est_wishlist) {
+                showPage('wishlist', { isWishlist: true });
+            } else {
+                showPage('collection', { isWishlist: false });
+            }
+        }, 300);
     } catch (error) {
-        // showAlert est déjà appelé par callApi
+        // Erreur déjà gérée
     }
 }
 
-
-// Supprimer un livre
 async function deleteBook(bookId, isWishlist) {
     if (!confirm('Êtes-vous sûr de vouloir supprimer ce livre ?')) {
         return;
@@ -527,37 +734,48 @@ async function deleteBook(bookId, isWishlist) {
     try {
         const endpoint = isWishlist ? `/wishlist/${bookId}` : `/books/${bookId}`;
         const response = await callApi(endpoint, 'DELETE');
+        clearCache();
         showAlert(response.message, 'info');
-        if (isWishlist) {
-            showPage('wishlist', { isWishlist: true });
-        } else {
-            showPage('collection', { isWishlist: false });
-        }
+        
+        setTimeout(() => {
+            if (isWishlist) {
+                showPage('wishlist', { isWishlist: true });
+            } else {
+                showPage('collection', { isWishlist: false });
+            }
+        }, 300);
     } catch (error) {
-        // L'erreur est déjà appelée par callApi
+        // Erreur déjà gérée
     }
 }
 
-// Déplacer de la wishlist vers la collection
 async function moveToCollection(bookId) {
     if (!confirm('Voulez-vous déplacer ce livre vers votre collection ?')) {
         return;
     }
     try {
         const response = await callApi(`/wishlist/${bookId}/move_to_collection`, 'POST');
+        clearCache();
         showAlert(response.message, 'success');
-        showPage('wishlist', { isWishlist: true }); // Recharger la wishlist après le déplacement
+        
+        setTimeout(() => {
+            showPage('wishlist', { isWishlist: true });
+        }, 300);
     } catch (error) {
-        // L'erreur est déjà appelée par callApi
+        // Erreur déjà gérée
     }
 }
 
-// --- Initialisation au chargement de la page ---
+// --- Initialisation ---
 document.addEventListener('DOMContentLoaded', () => {
+    console.time('Initialisation totale');
+    
     if (currentApiKey) {
         renderNavigation();
-        showPage('home'); // Si connecté, affiche la page d'accueil
+        showPage('home');
     } else {
-        showPage('login'); // Sinon, affiche la page de connexion
+        showPage('login');
     }
+    
+    console.timeEnd('Initialisation totale');
 });

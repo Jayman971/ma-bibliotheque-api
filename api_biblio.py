@@ -1,39 +1,55 @@
-# api_biblio.py - Version pour déploiement sur Render.com
+# api_biblio.py - Version OPTIMISÉE pour déploiement sur Render.com
 
 from flask import Flask, request, jsonify
 from functools import wraps
 import sqlite3
 import os
 from flask_cors import CORS
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
 # --- Configuration des clés secrètes via variables d'environnement ---
-# Pour la production, définissez SECRET_KEY sur Render. Pour les tests locaux, une valeur par défaut est utilisée.
 app.secret_key = os.environ.get('SECRET_KEY', 'CLE_SECRETE_POUR_API_FLASK_DEFAUT_EN_DEVELOPPEMENT_UNIQUEMENT_1234567890ABCDEF')
 
 # --- Activer CORS pour toutes les routes ---
-# En production, vous pourriez vouloir restreindre les origines (origins) autorisées
 CORS(app) 
 
 # --- Configuration de la base de données ---
-# Render.com conservera ma_bibliotheque1.db pour le plan gratuit,
-# mais pour une production réelle, une base de données externe est recommandée.
 DATABASE = 'ma_bibliotheque1.db'
 
-# --- Configuration des identifiants (via variables d'environnement pour la production) ---
-# Vous définirez RENDER_API_KEY_ADMIN et RENDER_API_KEY_ANDROID sur Render.
-# Les valeurs par défaut sont pour le développement local.
+# --- Configuration des identifiants ---
 API_KEYS = {
     os.getenv('RENDER_API_KEY_ADMIN', 'mon_api_key_secrete_pour_admin_local'): 'admin',
     os.getenv('RENDER_API_KEY_ANDROID', 'api_key_pour_mon_app_android_local'): 'app_android_user'
 }
 
-# Pour le mot de passe de l'utilisateur "admin", il est aussi lu depuis une variable d'environnement.
-# Vous définirez RENDER_ADMIN_PASSWORD sur Render.
 USERS_PASSWORDS = {
     'admin': os.getenv('RENDER_ADMIN_PASSWORD', 'VotreMotDePasse123!'),
 }
+
+# ✅ NOUVEAU : Cache simple en mémoire (pour Render gratuit)
+# Pour une vraie production, utilisez Redis
+cache_store = {}
+CACHE_DURATION = 30  # secondes
+
+def get_from_cache(key):
+    """Récupère une valeur du cache si elle n'est pas expirée"""
+    if key in cache_store:
+        data, timestamp = cache_store[key]
+        if datetime.now() - timestamp < timedelta(seconds=CACHE_DURATION):
+            return data
+        else:
+            del cache_store[key]  # Nettoie le cache expiré
+    return None
+
+def set_in_cache(key, value):
+    """Met une valeur en cache avec un timestamp"""
+    cache_store[key] = (value, datetime.now())
+
+def clear_cache():
+    """Vide tout le cache"""
+    cache_store.clear()
 
 # ====== SYSTÈME D'AUTHENTIFICATION API ======
 
@@ -42,20 +58,19 @@ def api_key_required(f):
     def decorated_function(*args, **kwargs):
         auth_header = request.headers.get('Authorization')
         if not auth_header:
-            return jsonify({'message': 'Authorization header is missing'}), 401 # Unauthorized
+            return jsonify({'message': 'Authorization header is missing'}), 401
 
         try:
-            scheme, api_key = auth_header.split(None, 1) # Sépare "Bearer" de la clé
+            scheme, api_key = auth_header.split(None, 1)
             if scheme.lower() != 'bearer':
                 return jsonify({'message': 'Invalid authorization scheme. Use Bearer.'}), 401
         except ValueError:
             return jsonify({'message': 'Invalid Authorization header format. Expected "Bearer <api_key>"'}), 401
 
-        # Vérifie si la clé est valide en la recherchant dans les clés de notre dictionnaire
         if api_key not in API_KEYS:
             return jsonify({'message': 'Invalid API Key'}), 401
         
-        request.current_user_api_key = api_key # Stocke la clé pour un usage potentiel dans la fonction
+        request.current_user_api_key = api_key
         return f(*args, **kwargs)
     return decorated_function
 
@@ -66,8 +81,6 @@ def api_login():
     password = data.get('password')
     
     if username in USERS_PASSWORDS and USERS_PASSWORDS[username] == password:
-        # Renvoie la clé API correspondante à l'utilisateur "admin"
-        # Pour d'autres utilisateurs, il faudrait une logique plus sophistiquée
         returned_api_key = next((key for key, value in API_KEYS.items() if value == 'admin' and username == 'admin'), None)
         if returned_api_key:
             return jsonify({'message': 'Login successful', 'api_key': returned_api_key}), 200
@@ -80,7 +93,7 @@ def api_login():
 
 def get_db_connection():
     conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row # Permet d'accéder aux colonnes par leur nom
+    conn.row_factory = sqlite3.Row
     return conn
 
 def create_table():
@@ -96,10 +109,18 @@ def create_table():
             est_wishlist INTEGER DEFAULT 0
         )
     ''')
+    
+    # ✅ NOUVEAU : Création d'index pour améliorer les performances
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_est_wishlist ON livres(est_wishlist)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_proprietaire ON livres(proprietaire)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_statut_lecture ON livres(statut_lecture)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_titre ON livres(titre)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_auteur ON livres(auteur)')
+    
     conn.commit()
     conn.close()
 
-create_table() # Assure que la table est créée au démarrage de l'application
+create_table()
 
 def row_to_dict(row):
     """Convertit un objet sqlite3.Row en dictionnaire."""
@@ -107,10 +128,7 @@ def row_to_dict(row):
 
 def get_book_by_id_helper(book_id, is_wishlist=None):
     """
-    Récupère un livre spécifique par ID, en spécifiant s'il doit être de la collection ou de la wishlist.
-    is_wishlist=None: cherche indifféremment
-    is_wishlist=False: cherche dans la collection
-    is_wishlist=True: cherche dans la wishlist
+    Récupère un livre spécifique par ID.
     """
     conn = get_db_connection()
     query = 'SELECT * FROM livres WHERE id = ?'
@@ -122,18 +140,93 @@ def get_book_by_id_helper(book_id, is_wishlist=None):
     conn.close()
     return book if book else None
 
+# ✅ NOUVEAU : Endpoint dédié aux statistiques (TRÈS RAPIDE)
+@app.route('/api/v1/stats', methods=['GET'])
+@api_key_required
+def get_stats():
+    """
+    Endpoint optimisé pour récupérer uniquement les statistiques
+    sans charger tous les livres
+    """
+    # Vérifier le cache
+    cache_key = 'stats_global'
+    cached_data = get_from_cache(cache_key)
+    if cached_data:
+        return jsonify(cached_data), 200
+    
+    conn = get_db_connection()
+    
+    # ✅ Une seule requête optimisée pour les stats de la collection
+    stats_collection = conn.execute('''
+        SELECT 
+            COUNT(*) as total,
+            COUNT(CASE WHEN proprietaire = 'J' THEN 1 END) as mes_livres,
+            COUNT(CASE WHEN proprietaire = 'K' THEN 1 END) as livres_k,
+            COUNT(CASE WHEN statut_lecture = 'a_lire' THEN 1 END) as a_lire,
+            COUNT(CASE WHEN statut_lecture = 'en_cours' THEN 1 END) as en_cours,
+            COUNT(CASE WHEN statut_lecture = 'lu' THEN 1 END) as lus,
+            ROUND(AVG(CASE WHEN note > 0 THEN note END), 1) as note_moyenne
+        FROM livres
+        WHERE est_wishlist = 0
+    ''').fetchone()
+    
+    # ✅ Une seule requête optimisée pour les stats de la wishlist
+    stats_wishlist = conn.execute('''
+        SELECT 
+            COUNT(*) as total,
+            COUNT(CASE WHEN proprietaire = 'J' THEN 1 END) as mes_souhaits,
+            COUNT(CASE WHEN proprietaire = 'K' THEN 1 END) as souhaits_k
+        FROM livres
+        WHERE est_wishlist = 1
+    ''').fetchone()
+    
+    conn.close()
+    
+    result = {
+        'collection': row_to_dict(stats_collection),
+        'wishlist': row_to_dict(stats_wishlist)
+    }
+    
+    # Mettre en cache
+    set_in_cache(cache_key, result)
+    
+    return jsonify(result), 200
+
 # ====== ROUTES API POUR LES LIVRES (COLLECTION) ======
 
 @app.route('/api/v1/books', methods=['GET'])
 @api_key_required
 def get_books():
-    conn = get_db_connection()
-    
+    # ✅ Paramètres de recherche
     search_query = request.args.get('query', '').strip()
     search_by = request.args.get('search_by', 'titre')
     proprietaire_filter = request.args.get('proprietaire', '')
     statut_filter = request.args.get('statut', '')
-
+    
+    # ✅ NOUVEAU : Paramètres de tri
+    sort_by = request.args.get('sort_by', 'titre')
+    sort_dir = request.args.get('sort_dir', 'asc').upper()
+    
+    # ✅ NOUVEAU : Pagination (optionnel)
+    page = int(request.args.get('page', 1))
+    per_page = int(request.args.get('per_page', 1000))  # Par défaut, tous les livres
+    
+    # Validation du tri
+    allowed_sort_columns = ['titre', 'auteur', 'note', 'proprietaire', 'statut_lecture', 'id']
+    if sort_by not in allowed_sort_columns:
+        sort_by = 'titre'
+    if sort_dir not in ['ASC', 'DESC']:
+        sort_dir = 'ASC'
+    
+    # Construction de la clé de cache
+    cache_key = f'books_{search_query}_{search_by}_{proprietaire_filter}_{statut_filter}_{sort_by}_{sort_dir}_{page}_{per_page}'
+    cached_data = get_from_cache(cache_key)
+    if cached_data:
+        return jsonify(cached_data), 200
+    
+    conn = get_db_connection()
+    
+    # ✅ Requête optimisée avec tri côté serveur
     sql_query = 'SELECT id, titre, auteur, note, proprietaire, statut_lecture, est_wishlist FROM livres WHERE est_wishlist = 0'
     params = []
 
@@ -152,11 +245,18 @@ def get_books():
         sql_query += ' AND statut_lecture = ?'
         params.append(statut_filter)
     
-    sql_query += ' ORDER BY titre'
-
+    # ✅ Tri côté serveur
+    sql_query += f' ORDER BY {sort_by} {sort_dir}'
+    
+    # ✅ Pagination
+    if per_page < 1000:  # Seulement si pagination activée
+        offset = (page - 1) * per_page
+        sql_query += f' LIMIT {per_page} OFFSET {offset}'
+    
     livres_db = conn.execute(sql_query, params).fetchall()
     livres = [row_to_dict(row) for row in livres_db]
     
+    # Stats (déjà optimisées)
     stats_db = conn.execute('''
         SELECT 
             COUNT(*) as total,
@@ -173,17 +273,30 @@ def get_books():
     
     conn.close()
     
-    return jsonify({
+    result = {
         'books': livres,
         'stats': stats
-    }), 200
+    }
+    
+    # Mettre en cache
+    set_in_cache(cache_key, result)
+    
+    return jsonify(result), 200
 
 @app.route('/api/v1/books/<int:book_id>', methods=['GET'])
 @api_key_required
 def get_book_by_id(book_id):
-    book = get_book_by_id_helper(book_id, is_wishlist=False) # Cherche spécifiquement dans la collection
+    # Vérifier le cache
+    cache_key = f'book_{book_id}'
+    cached_data = get_from_cache(cache_key)
+    if cached_data:
+        return jsonify(cached_data), 200
+    
+    book = get_book_by_id_helper(book_id, is_wishlist=False)
     if book:
-        return jsonify(row_to_dict(book)), 200
+        result = row_to_dict(book)
+        set_in_cache(cache_key, result)
+        return jsonify(result), 200
     else:
         return jsonify({'message': 'Livre non trouvé dans la collection'}), 404
 
@@ -197,7 +310,7 @@ def add_book():
     note = int(data.get('note', 0))
     proprietaire = data.get('proprietaire', 'J')
     statut_lecture = data.get('statut_lecture', 'lu')
-    est_wishlist = 0 # Pour la collection, est_wishlist est toujours 0
+    est_wishlist = 0
 
     if not titre or not auteur:
         return jsonify({'message': 'Le titre et l\'auteur sont obligatoires'}), 400
@@ -210,7 +323,10 @@ def add_book():
         new_book_id = cursor.lastrowid
         conn.close()
         
-        return jsonify({'message': 'Livre ajouté à la collection avec succès !', 'id': new_book_id}), 201 # Created
+        # ✅ IMPORTANT : Vider le cache après modification
+        clear_cache()
+        
+        return jsonify({'message': 'Livre ajouté à la collection avec succès !', 'id': new_book_id}), 201
     except Exception as e:
         conn.rollback()
         conn.close()
@@ -241,6 +357,9 @@ def update_book(book_id):
         conn.commit()
         conn.close()
         
+        # ✅ IMPORTANT : Vider le cache après modification
+        clear_cache()
+        
         return jsonify({'message': f'Le livre ID {book_id} a été mis à jour dans la collection !'}), 200
     except Exception as e:
         conn.rollback()
@@ -258,6 +377,10 @@ def delete_book(book_id):
             conn.execute('DELETE FROM livres WHERE id = ? AND est_wishlist = 0', (book_id,))
             conn.commit()
             conn.close()
+            
+            # ✅ IMPORTANT : Vider le cache après modification
+            clear_cache()
+            
             return jsonify({'message': f'Le livre "{book_db["titre"]}" a été supprimé de la collection.'}), 200
         except Exception as e:
             conn.rollback()
@@ -271,10 +394,27 @@ def delete_book(book_id):
 @app.route('/api/v1/wishlist', methods=['GET'])
 @api_key_required
 def get_wishlist():
-    conn = get_db_connection()
-    
     search_query = request.args.get('query', '').strip()
     search_by = request.args.get('search_by', 'titre')
+    
+    # ✅ NOUVEAU : Paramètres de tri
+    sort_by = request.args.get('sort_by', 'titre')
+    sort_dir = request.args.get('sort_dir', 'asc').upper()
+    
+    # Validation du tri
+    allowed_sort_columns = ['titre', 'auteur', 'proprietaire', 'id']
+    if sort_by not in allowed_sort_columns:
+        sort_by = 'titre'
+    if sort_dir not in ['ASC', 'DESC']:
+        sort_dir = 'ASC'
+    
+    # Cache
+    cache_key = f'wishlist_{search_query}_{search_by}_{sort_by}_{sort_dir}'
+    cached_data = get_from_cache(cache_key)
+    if cached_data:
+        return jsonify(cached_data), 200
+    
+    conn = get_db_connection()
     
     sql_query = 'SELECT id, titre, auteur, proprietaire FROM livres WHERE est_wishlist = 1'
     params = []
@@ -286,7 +426,8 @@ def get_wishlist():
             sql_query += ' AND auteur LIKE ?'
         params.append(f'%{search_query}%')
     
-    sql_query += ' ORDER BY titre'
+    # ✅ Tri côté serveur
+    sql_query += f' ORDER BY {sort_by} {sort_dir}'
     
     wishlist_livres_db = conn.execute(sql_query, params).fetchall()
     wishlist_livres = [row_to_dict(row) for row in wishlist_livres_db]
@@ -303,17 +444,30 @@ def get_wishlist():
     
     conn.close()
     
-    return jsonify({
+    result = {
         'wishlist_books': wishlist_livres,
         'stats': stats_wishlist
-    }), 200
+    }
+    
+    # Cache
+    set_in_cache(cache_key, result)
+    
+    return jsonify(result), 200
 
 @app.route('/api/v1/wishlist/<int:book_id>', methods=['GET'])
 @api_key_required
 def get_wishlist_book_by_id(book_id):
-    book = get_book_by_id_helper(book_id, is_wishlist=True) # Cherche spécifiquement dans la wishlist
+    # Cache
+    cache_key = f'wishlist_book_{book_id}'
+    cached_data = get_from_cache(cache_key)
+    if cached_data:
+        return jsonify(cached_data), 200
+    
+    book = get_book_by_id_helper(book_id, is_wishlist=True)
     if book:
-        return jsonify(row_to_dict(book)), 200
+        result = row_to_dict(book)
+        set_in_cache(cache_key, result)
+        return jsonify(result), 200
     else:
         return jsonify({'message': 'Livre non trouvé dans la wishlist'}), 404
 
@@ -337,6 +491,9 @@ def add_to_wishlist():
         conn.commit()
         new_book_id = cursor.lastrowid
         conn.close()
+        
+        # ✅ Vider le cache
+        clear_cache()
         
         return jsonify({'message': 'Livre ajouté à la wishlist avec succès !', 'id': new_book_id}), 201
     except Exception as e:
@@ -367,6 +524,9 @@ def update_wishlist_book(book_id):
         conn.commit()
         conn.close()
         
+        # ✅ Vider le cache
+        clear_cache()
+        
         return jsonify({'message': f'Le livre ID {book_id} a été mis à jour dans la wishlist !'}), 200
     except Exception as e:
         conn.rollback()
@@ -384,6 +544,10 @@ def delete_wishlist_book(book_id):
             conn.execute('DELETE FROM livres WHERE id = ? AND est_wishlist = 1', (book_id,))
             conn.commit()
             conn.close()
+            
+            # ✅ Vider le cache
+            clear_cache()
+            
             return jsonify({'message': f'Le livre "{book_db["titre"]}" a été supprimé de la wishlist.'}), 200
         except Exception as e:
             conn.rollback()
@@ -404,6 +568,10 @@ def move_to_collection(book_id):
                          ('a_lire', book_id))
             conn.commit()
             conn.close()
+            
+            # ✅ Vider le cache
+            clear_cache()
+            
             return jsonify({'message': f'Le livre "{book["titre"]}" a été ajouté à votre collection !'}), 200
         except Exception as e:
             conn.rollback()
@@ -412,23 +580,36 @@ def move_to_collection(book_id):
     else:
         return jsonify({'message': 'Livre non trouvé dans la wishlist'}), 404
 
+# ✅ NOUVEAU : Endpoint pour vider manuellement le cache (utile pour le debug)
+@app.route('/api/v1/cache/clear', methods=['POST'])
+@api_key_required
+def clear_cache_endpoint():
+    clear_cache()
+    return jsonify({'message': 'Cache vidé avec succès'}), 200
+
+# ✅ NOUVEAU : Endpoint de santé (health check)
+@app.route('/api/v1/health', methods=['GET'])
+def health_check():
+    """Endpoint pour vérifier que l'API fonctionne"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat(),
+        'cache_size': len(cache_store)
+    }), 200
+
 # ====== GESTION DES ERREURS API ======
 @app.errorhandler(404)
 def not_found(error):
     return jsonify({'message': 'Ressource non trouvée', 'error': str(error)}), 404
 
-@app.errorhandler(405) # Méthode non autorisée
+@app.errorhandler(405)
 def method_not_allowed(error):
     return jsonify({'message': 'Méthode non autorisée pour cette ressource', 'error': str(error)}), 405
 
 @app.errorhandler(500)
 def internal_error(error):
-    # En production, évitez de donner trop de détails sur l'erreur
     return jsonify({'message': 'Erreur interne du serveur', 'error': str(error)}), 500
 
-# ====== Point d'entrée pour l'exécution locale (développement) ======
-# En production, Gunicorn (via Procfile) s'occupera de démarrer l'application.
+# ====== Point d'entrée pour l'exécution locale ======
 if __name__ == '__main__':
-    # Le port est lu depuis la variable d'environnement PORT si elle existe (utilisé par Render),
-    # sinon, il utilise 8081 pour les tests locaux.
     app.run(debug=True, host='0.0.0.0', port=os.getenv('PORT', '8081'))
