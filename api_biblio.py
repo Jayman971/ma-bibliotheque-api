@@ -1,4 +1,4 @@
-# api_biblio.py - Version COMPLÈTE avec Tags, Prêts, Recommandations et Transformation J/K
+# api_biblio.py - Version CORRIGÉE avec gestion des migrations
 
 from flask import Flask, request, jsonify
 from functools import wraps
@@ -144,8 +144,19 @@ def get_db_connection():
     conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
     return conn
 
+def column_exists(cur, table_name, column_name):
+    """Vérifie si une colonne existe dans une table"""
+    cur.execute("""
+        SELECT EXISTS (
+            SELECT 1 
+            FROM information_schema.columns 
+            WHERE table_name = %s AND column_name = %s
+        )
+    """, (table_name, column_name))
+    return cur.fetchone()['exists']
+
 def create_tables():
-    """Crée toutes les tables nécessaires"""
+    """Crée toutes les tables nécessaires avec gestion des migrations"""
     conn = get_db_connection()
     with conn.cursor() as cur:
         # ✅ Table des livres
@@ -158,10 +169,14 @@ def create_tables():
                 proprietaire TEXT NOT NULL DEFAULT 'J',
                 statut_lecture TEXT DEFAULT 'lu',
                 est_wishlist INTEGER DEFAULT 0,
-                category_id INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        
+        # ✅ Ajouter category_id si elle n'existe pas (migration)
+        if not column_exists(cur, 'livres', 'category_id'):
+            cur.execute('ALTER TABLE livres ADD COLUMN category_id INTEGER')
+            print("✅ Colonne category_id ajoutée à la table livres")
         
         # ✅ Table des catégories
         cur.execute('''
@@ -242,13 +257,17 @@ def create_tables():
             )
         ''')
         
-        # ✅ Index pour améliorer les performances
+        # ✅ Index pour améliorer les performances (seulement si les colonnes existent)
         cur.execute('CREATE INDEX IF NOT EXISTS idx_est_wishlist ON livres(est_wishlist)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_proprietaire ON livres(proprietaire)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_statut_lecture ON livres(statut_lecture)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_titre ON livres(titre)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_auteur ON livres(auteur)')
-        cur.execute('CREATE INDEX IF NOT EXISTS idx_category_id ON livres(category_id)')
+        
+        # Créer l'index sur category_id seulement si la colonne existe
+        if column_exists(cur, 'livres', 'category_id'):
+            cur.execute('CREATE INDEX IF NOT EXISTS idx_category_id ON livres(category_id)')
+        
         cur.execute('CREATE INDEX IF NOT EXISTS idx_loan_status ON loans(status)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_loan_book_id ON loans(book_id)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_loan_user_id ON loans(user_id)')
@@ -977,7 +996,7 @@ def get_books():
     search_by = request.args.get('search_by', 'titre')
     proprietaire_filter = request.args.get('proprietaire', '')
     statut_filter = request.args.get('statut', '')
-    tags_filter = request.args.getlist('tags')  # Liste de tags
+    tags_filter = request.getlist('tags')  # Liste de tags
     
     sort_by = request.args.get('sort_by', 'titre')
     sort_dir = request.args.get('sort_dir', 'asc').upper()
