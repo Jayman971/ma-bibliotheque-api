@@ -38,7 +38,10 @@ let globalLoader = null;
 
 function showToast(message, type = 'info', duration = 3000) {
     const container = document.getElementById('toastContainer');
-    if (!container) return;
+    if (!container) {
+        console.warn('Toast container not found');
+        return;
+    }
     
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
@@ -134,6 +137,8 @@ function openModal(modalId) {
     if (modal) {
         modal.style.display = 'flex';
         document.body.style.overflow = 'hidden';
+    } else {
+        console.warn(`Modal ${modalId} not found`);
     }
 }
 
@@ -163,10 +168,20 @@ function closeConfirmModal() {
 
 // Modal de confirmation personnalisée
 function showConfirmDialog(title, message, onConfirm) {
-    document.getElementById('confirmTitle').textContent = title;
-    document.getElementById('confirmMessage').textContent = message;
-    
+    const titleEl = document.getElementById('confirmTitle');
+    const messageEl = document.getElementById('confirmMessage');
     const confirmBtn = document.getElementById('confirmBtn');
+    
+    if (!titleEl || !messageEl || !confirmBtn) {
+        console.error('Confirm modal elements not found');
+        if (confirm(message)) {
+            onConfirm();
+        }
+        return;
+    }
+    
+    titleEl.textContent = title;
+    messageEl.textContent = message;
     
     // Retirer les anciens listeners
     const newConfirmBtn = confirmBtn.cloneNode(true);
@@ -305,6 +320,7 @@ async function getQuickStats() {
             loans: loansResponse.loans?.length || 0
         };
     } catch (error) {
+        console.error('Erreur stats:', error);
         return { total: 0, loans: 0 };
     }
 }
@@ -318,6 +334,8 @@ async function checkOverdueLoans() {
         
         const badge = document.getElementById('notificationBadge');
         const btn = document.getElementById('notificationsBtn');
+        
+        if (!badge || !btn) return;
         
         if (overdueLoans.length > 0) {
             badge.textContent = overdueLoans.length;
@@ -682,7 +700,6 @@ async function renderHomePage() {
 async function renderBookListPage(data) {
     const isWishlist = data.isWishlist;
     const pageTitle = isWishlist ? '💖 Ma Wishlist' : '📚 Ma Collection de Livres';
-    const endpoint = isWishlist ? '/wishlist' : '/books';
 
     appContainer.innerHTML = `
         <h2>${pageTitle}</h2>
@@ -1100,15 +1117,25 @@ async function openAddBookModal(isWishlist = false) {
     // Charger les catégories
     await loadCategories();
     
-    // Réinitialiser le formulaire
-    document.getElementById('bookForm').reset();
-    document.getElementById('bookId').value = '';
-    document.getElementById('bookModalTitle').textContent = 'Ajouter un nouveau livre';
-    document.getElementById('bookNote').value = '0';
-    document.getElementById('selectedTags').innerHTML = '';
+    const bookForm = document.getElementById('bookForm');
+    if (bookForm) {
+        bookForm.reset();
+    }
     
-    // Mettre le statut par défaut
-    document.getElementById('bookStatut').value = isWishlist ? 'a_lire' : 'lu';
+    const bookIdInput = document.getElementById('bookId');
+    const bookModalTitle = document.getElementById('bookModalTitle');
+    const bookNoteInput = document.getElementById('bookNote');
+    const selectedTags = document.getElementById('selectedTags');
+    const bookStatut = document.getElementById('bookStatut');
+    
+    if (bookIdInput) bookIdInput.value = '';
+    if (bookModalTitle) bookModalTitle.textContent = 'Ajouter un nouveau livre';
+    if (bookNoteInput) bookNoteInput.value = '0';
+    if (selectedTags) selectedTags.innerHTML = '';
+    if (bookStatut) bookStatut.value = isWishlist ? 'a_lire' : 'lu';
+    
+    // Réinitialiser l'affichage des étoiles
+    updateStarDisplay(0);
     
     openModal('bookModal');
 }
@@ -1122,25 +1149,36 @@ async function editBookInModal(bookId, isWishlist = false) {
         
         const book = await callApi(isWishlist ? `/wishlist/${bookId}` : `/books/${bookId}`);
         
-        document.getElementById('bookModalTitle').textContent = `Modifier : "${book.titre}"`;
-        document.getElementById('bookId').value = book.id;
-        document.getElementById('bookTitre').value = book.titre;
-        document.getElementById('bookAuteur').value = book.auteur;
-        document.getElementById('bookNote').value = book.note || 0;
-        document.getElementById('bookProprietaire').value = book.proprietaire;
-        document.getElementById('bookStatut').value = book.statut_lecture || 'lu';
-        document.getElementById('bookCategory').value = book.category_id || '';
+        const bookModalTitle = document.getElementById('bookModalTitle');
+        const bookIdInput = document.getElementById('bookId');
+        const bookTitreInput = document.getElementById('bookTitre');
+        const bookAuteurInput = document.getElementById('bookAuteur');
+        const bookNoteInput = document.getElementById('bookNote');
+        const bookProprietaireSelect = document.getElementById('bookProprietaire');
+        const bookStatutSelect = document.getElementById('bookStatut');
+        const bookCategorySelect = document.getElementById('bookCategory');
+        
+        if (bookModalTitle) bookModalTitle.textContent = `Modifier : "${book.titre}"`;
+        if (bookIdInput) bookIdInput.value = book.id;
+        if (bookTitreInput) bookTitreInput.value = book.titre;
+        if (bookAuteurInput) bookAuteurInput.value = book.auteur;
+        if (bookNoteInput) bookNoteInput.value = book.note || 0;
+        if (bookProprietaireSelect) bookProprietaireSelect.value = book.proprietaire;
+        if (bookStatutSelect) bookStatutSelect.value = book.statut_lecture || 'lu';
+        if (bookCategorySelect) bookCategorySelect.value = book.category_id || '';
         
         // Mettre à jour l'affichage des étoiles
         updateStarDisplay(book.note || 0);
         
         // Charger les tags
         const selectedTagsContainer = document.getElementById('selectedTags');
-        selectedTagsContainer.innerHTML = '';
-        if (book.tags && book.tags.length > 0) {
-            book.tags.forEach(tag => {
-                addTagToForm(tag.name);
-            });
+        if (selectedTagsContainer) {
+            selectedTagsContainer.innerHTML = '';
+            if (book.tags && book.tags.length > 0) {
+                book.tags.forEach(tag => {
+                    addTagToForm(tag.name);
+                });
+            }
         }
         
         hideLoader();
@@ -1173,6 +1211,7 @@ async function loadCategories() {
 
 function addTagToForm(tagName) {
     const selectedTags = document.getElementById('selectedTags');
+    if (!selectedTags) return;
     
     // Vérifier si le tag existe déjà
     const existingTags = Array.from(selectedTags.querySelectorAll('.tag-item')).map(tag => tag.dataset.tagName);
@@ -1192,69 +1231,91 @@ function addTagToForm(tagName) {
     selectedTags.appendChild(tagElement);
 }
 
-// Gestionnaire du formulaire de livre
-document.addEventListener('DOMContentLoaded', () => {
-    const bookForm = document.getElementById('bookForm');
-    if (bookForm) {
-        bookForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const bookId = document.getElementById('bookId').value;
-            const isEditing = !!bookId;
-            
-            const bookData = {
-                titre: document.getElementById('bookTitre').value.trim(),
-                auteur: document.getElementById('bookAuteur').value.trim(),
-                proprietaire: document.getElementById('bookProprietaire').value,
-                note: parseInt(document.getElementById('bookNote').value) || 0,
-                statut_lecture: document.getElementById('bookStatut').value,
-                category_id: parseInt(document.getElementById('bookCategory').value) || null
-            };
-            
-            // Récupérer les tags
-            const tagElements = document.querySelectorAll('#selectedTags .tag-item');
-            bookData.tags = Array.from(tagElements).map(tag => tag.dataset.tagName);
-            
-            showLoader(isEditing ? 'Modification en cours...' : 'Ajout en cours...');
-            
-            try {
-                if (isEditing) {
-                    await callApi(`/books/${bookId}`, 'PUT', bookData);
-                    showToast('✅ Livre modifié avec succès !', 'success');
-                } else {
-                    await callApi('/books', 'POST', bookData);
-                    showToast('✅ Livre ajouté avec succès !', 'success');
-                }
-                
-                clearCache();
-                closeBookModal();
-                hideLoader();
-                
-                // Rafraîchir la page actuelle
-                setTimeout(() => {
-                    showPage('collection', { isWishlist: false });
-                }, 300);
-            } catch (error) {
-                hideLoader();
-            }
-        });
+function updateStarDisplay(rating, isHover = false) {
+    const stars = document.querySelectorAll('#starRating i');
+    stars.forEach((star, index) => {
+        if (index < rating) {
+            star.className = 'fas fa-star';
+        } else {
+            star.className = 'far fa-star';
+        }
+    });
+}
+
+function updateCalculatedDueDate() {
+    const durationInput = document.getElementById('loanDuration');
+    const dueDateElement = document.getElementById('calculatedDueDate');
+    
+    if (!durationInput || !dueDateElement) return;
+    
+    const duration = parseInt(durationInput.value) || 14;
+    const dueDate = new Date();
+    dueDate.setDate(dueDate.getDate() + duration);
+    
+    dueDateElement.textContent = dueDate.toLocaleDateString('fr-FR', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+    });
+}
+
+async function handleBookFormSubmit(e) {
+    e.preventDefault();
+    
+    const bookIdInput = document.getElementById('bookId');
+    const bookTitreInput = document.getElementById('bookTitre');
+    const bookAuteurInput = document.getElementById('bookAuteur');
+    const bookProprietaireSelect = document.getElementById('bookProprietaire');
+    const bookNoteInput = document.getElementById('bookNote');
+    const bookStatutSelect = document.getElementById('bookStatut');
+    const bookCategorySelect = document.getElementById('bookCategory');
+    
+    if (!bookTitreInput || !bookAuteurInput) {
+        showToast('Formulaire incomplet', 'error');
+        return;
     }
     
-    // Gestion des tags dans le formulaire
-    const newTagInput = document.getElementById('bookTags');
-    if (newTagInput) {
-        newTagInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                const tagName = e.target.value.trim().toLowerCase();
-                if (tagName) {
-                    addTagToForm(tagName);
-                    e.target.value = '';
-                }
-            }
-        });
+    const bookId = bookIdInput ? bookIdInput.value : '';
+    const isEditing = !!bookId;
+    
+    const bookData = {
+        titre: bookTitreInput.value.trim(),
+        auteur: bookAuteurInput.value.trim(),
+        proprietaire: bookProprietaireSelect ? bookProprietaireSelect.value : 'J',
+        note: bookNoteInput ? parseInt(bookNoteInput.value) || 0 : 0,
+        statut_lecture: bookStatutSelect ? bookStatutSelect.value : 'lu',
+        category_id: bookCategorySelect ? (parseInt(bookCategorySelect.value) || null) : null
+    };
+    
+    // Récupérer les tags
+    const tagElements = document.querySelectorAll('#selectedTags .tag-item');
+    bookData.tags = Array.from(tagElements).map(tag => tag.dataset.tagName);
+    
+    showLoader(isEditing ? 'Modification en cours...' : 'Ajout en cours...');
+    
+    try {
+        if (isEditing) {
+            await callApi(`/books/${bookId}`, 'PUT', bookData);
+            showToast('✅ Livre modifié avec succès !', 'success');
+        } else {
+            await callApi('/books', 'POST', bookData);
+            showToast('✅ Livre ajouté avec succès !', 'success');
+        }
+        
+        clearCache();
+        closeBookModal();
+        hideLoader();
+        
+        // Rafraîchir la page actuelle
+        setTimeout(() => {
+            showPage('collection', { isWishlist: false });
+        }, 300);
+    } catch (error) {
+        hideLoader();
+        console.error('Erreur formulaire livre:', error);
     }
-});
+}
 
 async function deleteBookWithConfirm(bookId, isWishlist, titre) {
     showConfirmDialog(
@@ -1338,6 +1399,7 @@ async function loadTagsList() {
         const tags = response.tags || [];
         
         const tagsListContent = document.getElementById('tagsListContent');
+        if (!tagsListContent) return;
         
         if (tags.length === 0) {
             tagsListContent.innerHTML = `
@@ -1358,17 +1420,22 @@ async function loadTagsList() {
             `;
         }
     } catch (error) {
-        document.getElementById('tagsListContent').innerHTML = `
-            <div class="error-message">
-                <p>Erreur lors du chargement des tags</p>
-                <button onclick="loadTagsList()">Réessayer</button>
-            </div>
-        `;
+        const tagsListContent = document.getElementById('tagsListContent');
+        if (tagsListContent) {
+            tagsListContent.innerHTML = `
+                <div class="error-message">
+                    <p>Erreur lors du chargement des tags</p>
+                    <button onclick="loadTagsList()">Réessayer</button>
+                </div>
+            `;
+        }
     }
 }
 
 async function createNewTag() {
     const input = document.getElementById('newTagName');
+    if (!input) return;
+    
     const tagName = input.value.trim().toLowerCase();
     
     if (!tagName) {
@@ -1414,6 +1481,8 @@ async function renderLoansPage() {
 
 async function loadLoans(forceRefresh = false) {
     const loansContent = document.getElementById('loansContent');
+    if (!loansContent) return;
+    
     loansContent.innerHTML = '<div class="spinner"></div><p>Chargement...</p>';
     
     const statusFilter = document.getElementById('loanStatusFilter')?.value || '';
@@ -1486,9 +1555,13 @@ async function loadLoans(forceRefresh = false) {
 }
 
 async function createLoanForBook(bookId, titre) {
-    document.getElementById('loanModalTitle').textContent = `Prêter : "${titre}"`;
-    document.getElementById('loanBookId').value = bookId;
-    document.getElementById('loanDuration').value = 14;
+    const loanModalTitle = document.getElementById('loanModalTitle');
+    const loanBookIdInput = document.getElementById('loanBookId');
+    const loanDurationInput = document.getElementById('loanDuration');
+    
+    if (loanModalTitle) loanModalTitle.textContent = `Prêter : "${titre}"`;
+    if (loanBookIdInput) loanBookIdInput.value = bookId;
+    if (loanDurationInput) loanDurationInput.value = 14;
     
     // Charger les utilisateurs
     try {
@@ -1496,13 +1569,15 @@ async function createLoanForBook(bookId, titre) {
         const users = response.users || [];
         
         const userSelect = document.getElementById('loanUser');
-        userSelect.innerHTML = '<option value="">Sélectionner un utilisateur</option>';
-        users.forEach(user => {
-            const option = document.createElement('option');
-            option.value = user.id;
-            option.textContent = user.name;
-            userSelect.appendChild(option);
-        });
+        if (userSelect) {
+            userSelect.innerHTML = '<option value="">Sélectionner un utilisateur</option>';
+            users.forEach(user => {
+                const option = document.createElement('option');
+                option.value = user.id;
+                option.textContent = user.name;
+                userSelect.appendChild(option);
+            });
+        }
         
         updateCalculatedDueDate();
         openModal('loanModal');
@@ -1511,82 +1586,96 @@ async function createLoanForBook(bookId, titre) {
     }
 }
 
-// Gestionnaire du formulaire de prêt
-document.addEventListener('DOMContentLoaded', () => {
-    const loanForm = document.getElementById('loanForm');
-    if (loanForm) {
-        loanForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const bookId = document.getElementById('loanBookId').value;
-            const userId = document.getElementById('loanUser').value;
-            const duration = document.getElementById('loanDuration').value;
-            
-            if (!userId) {
-                showToast('Veuillez sélectionner un utilisateur', 'error');
-                return;
-            }
-            
-            showLoader('Création du prêt...');
-            
-            try {
-                await callApi('/loans', 'POST', {
-                    book_id: parseInt(bookId),
-                    user_id: parseInt(userId),
-                    loan_duration: parseInt(duration)
-                });
-                
-                clearCache();
-                hideLoader();
-                closeLoanModal();
-                showToast('Prêt créé avec succès !', 'success');
-                checkOverdueLoans(); // Mettre à jour les notifications
-            } catch (error) {
-                hideLoader();
-            }
-        });
+async function handleLoanFormSubmit(e) {
+    e.preventDefault();
+    
+    const loanBookIdInput = document.getElementById('loanBookId');
+    const loanUserSelect = document.getElementById('loanUser');
+    const loanDurationInput = document.getElementById('loanDuration');
+    
+    if (!loanBookIdInput || !loanUserSelect || !loanDurationInput) {
+        showToast('Formulaire incomplet', 'error');
+        return;
     }
-});
+    
+    const bookId = loanBookIdInput.value;
+    const userId = loanUserSelect.value;
+    const duration = loanDurationInput.value;
+    
+    if (!userId) {
+        showToast('Veuillez sélectionner un utilisateur', 'error');
+        return;
+    }
+    
+    showLoader('Création du prêt...');
+    
+    try {
+        await callApi('/loans', 'POST', {
+            book_id: parseInt(bookId),
+            user_id: parseInt(userId),
+            loan_duration: parseInt(duration)
+        });
+        
+        clearCache();
+        hideLoader();
+        closeLoanModal();
+        showToast('Prêt créé avec succès !', 'success');
+        checkOverdueLoans();
+    } catch (error) {
+        hideLoader();
+        console.error('Erreur création prêt:', error);
+    }
+}
 
 function showAddUserForm() {
     closeLoanModal();
-    document.getElementById('userName').value = '';
-    document.getElementById('userEmail').value = '';
+    
+    const userNameInput = document.getElementById('userName');
+    const userEmailInput = document.getElementById('userEmail');
+    
+    if (userNameInput) userNameInput.value = '';
+    if (userEmailInput) userEmailInput.value = '';
+    
     openModal('userModal');
 }
 
-// Gestionnaire du formulaire utilisateur
-document.addEventListener('DOMContentLoaded', () => {
-    const userForm = document.getElementById('userForm');
-    if (userForm) {
-        userForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const name = document.getElementById('userName').value.trim();
-            const email = document.getElementById('userEmail').value.trim();
-            
-            if (!name) {
-                showToast('Veuillez entrer un nom', 'error');
-                return;
-            }
-            
-            try {
-                await callApi('/users', 'POST', { name, email: email || null });
-                showToast('Utilisateur créé avec succès !', 'success');
-                closeUserModal();
-                
-                // Recharger la modal de prêt si elle était ouverte
-                const loanBookId = document.getElementById('loanBookId').value;
-                if (loanBookId) {
-                    const titre = document.getElementById('loanModalTitle').textContent.replace('Prêter : "', '').replace('"', '');
-                    createLoanForBook(loanBookId, titre);
-                }
-            } catch (error) {
-                // Erreur déjà gérée
-            }
-        });
+async function handleUserFormSubmit(e) {
+    e.preventDefault();
+    
+    const userNameInput = document.getElementById('userName');
+    const userEmailInput = document.getElementById('userEmail');
+    
+    if (!userNameInput) {
+        showToast('Formulaire incomplet', 'error');
+        return;
     }
-});
+    
+    const name = userNameInput.value.trim();
+    const email = userEmailInput ? userEmailInput.value.trim() : '';
+    
+    if (!name) {
+        showToast('Veuillez entrer un nom', 'error');
+        return;
+    }
+    
+    try {
+        await callApi('/users', 'POST', { name, email: email || null });
+        showToast('Utilisateur créé avec succès !', 'success');
+        closeUserModal();
+        
+        // Recharger la modal de prêt si elle était ouverte
+        const loanBookIdInput = document.getElementById('loanBookId');
+        if (loanBookIdInput && loanBookIdInput.value) {
+            const loanModalTitle = document.getElementById('loanModalTitle');
+            if (loanModalTitle) {
+                const titre = loanModalTitle.textContent.replace('Prêter : "', '').replace('"', '');
+                createLoanForBook(loanBookIdInput.value, titre);
+            }
+        }
+    } catch (error) {
+        console.error('Erreur création utilisateur:', error);
+    }
+}
 
 async function returnLoanWithConfirm(loanId, titre) {
     showConfirmDialog(
@@ -1610,7 +1699,7 @@ async function returnLoanWithConfirm(loanId, titre) {
 async function extendLoan(loanId) {
     try {
         showLoader('Prolongation...');
-        const response = await callApi(`/loans/${loanId}/extend`, 'PATCH', { additional_days: 7 });
+        await callApi(`/loans/${loanId}/extend`, 'PATCH', { additional_days: 7 });
         hideLoader();
         showToast('Prêt prolongé de 7 jours !', 'success');
         loadLoans();
@@ -1637,6 +1726,7 @@ async function renderRecommendationsPage() {
 
 async function loadRecommendations() {
     const recommendationsContent = document.getElementById('recommendationsContent');
+    if (!recommendationsContent) return;
     
     try {
         const response = await callApi(`/recommendations/${currentUserId}?limit=10`, 'GET', null, true, true);
@@ -1717,6 +1807,7 @@ async function loadUsersList() {
         const users = response.users || [];
         
         const usersListContent = document.getElementById('usersListContent');
+        if (!usersListContent) return;
         
         if (users.length === 0) {
             usersListContent.innerHTML = `
@@ -1741,12 +1832,15 @@ async function loadUsersList() {
             `;
         }
     } catch (error) {
-        document.getElementById('usersListContent').innerHTML = `
-            <div class="error-message">
-                <p>Erreur lors du chargement des utilisateurs</p>
-                <button onclick="loadUsersList()">Réessayer</button>
-            </div>
-        `;
+        const usersListContent = document.getElementById('usersListContent');
+        if (usersListContent) {
+            usersListContent.innerHTML = `
+                <div class="error-message">
+                    <p>Erreur lors du chargement des utilisateurs</p>
+                    <button onclick="loadUsersList()">Réessayer</button>
+                </div>
+            `;
+        }
     }
 }
 
@@ -1754,8 +1848,10 @@ async function createNewUserFromPage() {
     const nameInput = document.getElementById('newUserNamePage');
     const emailInput = document.getElementById('newUserEmailPage');
     
+    if (!nameInput) return;
+    
     const name = nameInput.value.trim();
-    const email = emailInput.value.trim();
+    const email = emailInput ? emailInput.value.trim() : '';
     
     if (!name) {
         showToast('Veuillez entrer un nom', 'error');
@@ -1766,30 +1862,150 @@ async function createNewUserFromPage() {
         await callApi('/users', 'POST', { name, email: email || null });
         showToast('Utilisateur créé avec succès !', 'success');
         nameInput.value = '';
-        emailInput.value = '';
+        if (emailInput) emailInput.value = '';
         loadUsersList();
     } catch (error) {
         // Erreur déjà gérée
     }
 }
 
-// ====== INITIALISATION ======
+// ====== PAGE FICTIVE renderAddEditBookForm (pour compatibilité) ======
+function renderAddEditBookForm(data = {}) {
+    // Cette fonction existe pour la compatibilité avec le routeur
+    // Elle redirige vers openAddBookModal
+    if (data.bookId) {
+        editBookInModal(data.bookId, data.isWishlist || false);
+    } else {
+        openAddBookModal(data.isWishlist || false);
+    }
+}
 
-document.addEventListener('DOMContentLoaded', () => {
+// ====== INITIALISATION PRINCIPALE ======
+
+function initializeApp() {
     console.time('⏱ Initialisation totale');
     
     console.log('🔗 API URL:', API_BASE_URL);
+    console.log('🔑 API Key présente:', !!currentApiKey);
     console.log('⏱ Cache duration:', CACHE_DURATION, 'ms');
     
     // Initialiser le mode sombre
     initDarkMode();
     
+    // Initialiser les event listeners pour les formulaires
+    initializeFormListeners();
+    
+    // Vérifier l'authentification et afficher la bonne page
     if (currentApiKey) {
+        console.log('✅ Utilisateur authentifié');
         renderNavigation();
         showPage('home');
     } else {
+        console.log('⚠ Pas d\'authentification, affichage du login');
         showPage('login');
     }
     
     console.timeEnd('⏱ Initialisation totale');
+}
+
+function initializeFormListeners() {
+    // Note: Ces listeners seront attachés dynamiquement quand les modals seront créées
+    // On les définit ici pour référence, mais l'attachement réel se fait dans les fonctions openModal
+    
+    console.log('✅ Form listeners initialisés (seront attachés dynamiquement)');
+}
+
+// ✅ Point d'entrée unique
+document.addEventListener('DOMContentLoaded', () => {
+    try {
+        initializeApp();
+        
+        // Attacher les event listeners aux formulaires dans les modals
+        setTimeout(() => {
+            const bookForm = document.getElementById('bookForm');
+            if (bookForm) {
+                bookForm.addEventListener('submit', handleBookFormSubmit);
+                console.log('✅ Book form listener attaché');
+            }
+            
+            const loanForm = document.getElementById('loanForm');
+            if (loanForm) {
+                loanForm.addEventListener('submit', handleLoanFormSubmit);
+                console.log('✅ Loan form listener attaché');
+            }
+            
+            const userForm = document.getElementById('userForm');
+            if (userForm) {
+                userForm.addEventListener('submit', handleUserFormSubmit);
+                console.log('✅ User form listener attaché');
+            }
+            
+            // Event listeners pour les tags
+            const newTagInput = document.getElementById('bookTags');
+            if (newTagInput) {
+                newTagInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const tagName = e.target.value.trim().toLowerCase();
+                        if (tagName) {
+                            addTagToForm(tagName);
+                            e.target.value = '';
+                        }
+                    }
+                });
+                console.log('✅ Tags input listener attaché');
+            }
+            
+            // Event listeners pour les étoiles
+            const stars = document.querySelectorAll('#starRating i');
+            const noteInput = document.getElementById('bookNote');
+            
+            if (stars.length > 0 && noteInput) {
+                stars.forEach(star => {
+                    star.addEventListener('click', () => {
+                        const rating = parseInt(star.getAttribute('data-rating'));
+                        noteInput.value = rating;
+                        updateStarDisplay(rating);
+                    });
+                    
+                    star.addEventListener('mouseenter', () => {
+                        const rating = parseInt(star.getAttribute('data-rating'));
+                        updateStarDisplay(rating, true);
+                    });
+                });
+                
+                const starRating = document.getElementById('starRating');
+                if (starRating) {
+                    starRating.addEventListener('mouseleave', () => {
+                        updateStarDisplay(parseInt(noteInput.value));
+                    });
+                }
+                
+                console.log('✅ Star rating listeners attachés');
+            }
+            
+            // Event listener pour la durée du prêt
+            const loanDurationInput = document.getElementById('loanDuration');
+            if (loanDurationInput) {
+                loanDurationInput.addEventListener('input', updateCalculatedDueDate);
+                console.log('✅ Loan duration listener attaché');
+            }
+        }, 500); // Attendre que les modals soient dans le DOM
+        
+    } catch (error) {
+        console.error('❌ Erreur fatale lors de l\'initialisation:', error);
+        if (appContainer) {
+            appContainer.innerHTML = `
+                <div class="error-message">
+                    <i class="fas fa-exclamation-triangle fa-3x"></i>
+                    <h2>Erreur de chargement</h2>
+                    <p>L'application n'a pas pu se charger correctement.</p>
+                    <small>${error.message}</small>
+                    <button onclick="location.reload()" style="margin-top: 20px;">
+                        <i class="fas fa-redo"></i> Recharger la page
+                    </button>
+                </div>
+            `;
+        }
+    }
 });
