@@ -8,7 +8,7 @@
     <!-- SEO & Description -->
     <title>Ma Bibliothèque - Gestion de Collection de Livres</title>
     <meta name="description" content="Gérez votre collection de livres, organisez votre wishlist et suivez vos lectures avec Ma Bibliothèque">
-    <meta name="keywords" content="bibliothèque, livres, collection, wishlist, lecture, gestion, prêts, recommandations">
+    <meta name="keywords" content="bibliothèque, livres, collection, wishlist, lecture, gestion, prêts">
     <meta name="author" content="Ma Bibliothèque">
     
     <!-- Open Graph / Facebook -->
@@ -47,7 +47,7 @@
             HEALTH_CHECK_INTERVAL: 60000,
             CACHE_DURATION: 60000,
             AUTOCOMPLETE_DELAY: 300, // ms
-            DEFAULT_USER_ID: 1 // ID utilisateur par défaut pour les recommandations et prêts
+            DEFAULT_USER_ID: 1 // ID utilisateur par défaut pour les prêts
         };
     </script>
     
@@ -141,32 +141,13 @@
                         </div>
                     </div>
                     
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="bookStatut">Statut de lecture</label>
-                            <select id="bookStatut">
-                                <option value="lu">Lu</option>
-                                <option value="en_cours">En cours</option>
-                                <option value="a_lire">À lire</option>
-                            </select>
-                        </div>
-                        
-                        <!-- ✅ Catégories -->
-                        <div class="form-group">
-                            <label for="bookCategory">Catégorie</label>
-                            <select id="bookCategory">
-                                <option value="">Aucune</option>
-                                <!-- Les catégories seront chargées dynamiquement -->
-                            </select>
-                        </div>
-                    </div>
-                    
-                    <!-- ✅ Tags -->
                     <div class="form-group">
-                        <label for="bookTags">Tags (séparés par des virgules)</label>
-                        <input type="text" id="bookTags" placeholder="fantasy, aventure, thriller...">
-                        <div class="tags-suggestions" id="tagsSuggestions" style="display: none;"></div>
-                        <div class="selected-tags" id="selectedTags"></div>
+                        <label for="bookStatut">Statut de lecture</label>
+                        <select id="bookStatut">
+                            <option value="lu">Lu</option>
+                            <option value="en_cours">En cours</option>
+                            <option value="a_lire">À lire</option>
+                        </select>
                     </div>
                     
                     <div class="modal-actions">
