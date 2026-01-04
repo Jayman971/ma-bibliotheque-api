@@ -697,9 +697,13 @@ async function renderHomePage() {
 
 // ====== PAGE DE LISTE DE LIVRES AVEC PAGINATION ET TAGS ======
 
+// ====== PAGE DE LISTE DE LIVRES AVEC PAGINATION ET TAGS ======
+
 async function renderBookListPage(data) {
     const isWishlist = data.isWishlist;
     const pageTitle = isWishlist ? '💖 Ma Wishlist' : '📚 Ma Collection de Livres';
+
+    console.log('🔍 Rendering book list page, isWishlist:', isWishlist);
 
     appContainer.innerHTML = `
         <h2>${pageTitle}</h2>
@@ -762,29 +766,46 @@ async function renderBookListPage(data) {
         <div id="paginationControls" class="pagination-controls"></div>
     `;
 
-    document.getElementById('applyFiltersBtn').addEventListener('click', () => {
-        currentPage = 1;
-        fetchAndRenderBooks(isWishlist);
-    });
-    
-    document.getElementById('refreshBtn').addEventListener('click', () => {
-        clearCache();
-        fetchAndRenderBooks(isWishlist);
-        showToast('Données actualisées !', 'info', 1500);
-    });
-    
-    document.getElementById('itemsPerPageSelect').addEventListener('change', (e) => {
-        itemsPerPage = parseInt(e.target.value);
-        currentPage = 1;
-        fetchAndRenderBooks(isWishlist);
-    });
-    
-    document.getElementById('searchQuery').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
+    const applyFiltersBtn = document.getElementById('applyFiltersBtn');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const itemsPerPageSelect = document.getElementById('itemsPerPageSelect');
+    const searchQuery = document.getElementById('searchQuery');
+
+    if (applyFiltersBtn) {
+        applyFiltersBtn.addEventListener('click', () => {
+            console.log('🔍 Applying filters');
             currentPage = 1;
             fetchAndRenderBooks(isWishlist);
-        }
-    });
+        });
+    }
+    
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => {
+            console.log('🔄 Refreshing data');
+            clearCache();
+            fetchAndRenderBooks(isWishlist);
+            showToast('Données actualisées !', 'info', 1500);
+        });
+    }
+    
+    if (itemsPerPageSelect) {
+        itemsPerPageSelect.addEventListener('change', (e) => {
+            itemsPerPage = parseInt(e.target.value);
+            currentPage = 1;
+            console.log('📄 Items per page changed to:', itemsPerPage);
+            fetchAndRenderBooks(isWishlist);
+        });
+    }
+    
+    if (searchQuery) {
+        searchQuery.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                currentPage = 1;
+                console.log('🔍 Search triggered');
+                fetchAndRenderBooks(isWishlist);
+            }
+        });
+    }
     
     // Initialiser l'autocomplétion sur le champ de recherche
     initAutocomplete('searchQuery', (book) => {
@@ -795,17 +816,38 @@ async function renderBookListPage(data) {
         }
     });
 
+    // Charger les livres immédiatement
     fetchAndRenderBooks(isWishlist);
 }
 
 async function fetchAndRenderBooks(isWishlist) {
     const bookListContent = document.getElementById('bookListContent');
+    if (!bookListContent) {
+        console.error('❌ bookListContent element not found');
+        return;
+    }
+    
     bookListContent.innerHTML = '<div class="spinner"></div><p>Chargement des livres...</p>';
 
-    const searchQuery = document.getElementById('searchQuery').value.trim();
-    const searchBy = document.getElementById('searchBy').value;
-    const proprietaireFilter = isWishlist ? '' : (document.getElementById('proprietaireFilter')?.value || '');
-    const statutFilter = isWishlist ? '' : (document.getElementById('statutFilter')?.value || '');
+    const searchQueryInput = document.getElementById('searchQuery');
+    const searchBySelect = document.getElementById('searchBy');
+    const proprietaireFilterSelect = document.getElementById('proprietaireFilter');
+    const statutFilterSelect = document.getElementById('statutFilter');
+
+    const searchQuery = searchQueryInput ? searchQueryInput.value.trim() : '';
+    const searchBy = searchBySelect ? searchBySelect.value : 'titre';
+    const proprietaireFilter = isWishlist ? '' : (proprietaireFilterSelect ? proprietaireFilterSelect.value : '');
+    const statutFilter = isWishlist ? '' : (statutFilterSelect ? statutFilterSelect.value : '');
+
+    console.log('📚 Fetching books with filters:', {
+        isWishlist,
+        searchQuery,
+        searchBy,
+        proprietaireFilter,
+        statutFilter,
+        page: currentPage,
+        perPage: itemsPerPage
+    });
 
     let queryString = new URLSearchParams();
     if (searchQuery) {
@@ -825,45 +867,54 @@ async function fetchAndRenderBooks(isWishlist) {
     queryString.append('per_page', itemsPerPage);
 
     const endpoint = isWishlist ? '/wishlist' : '/books';
+    const fullEndpoint = `${endpoint}?${queryString.toString()}`;
     
-    console.time('Chargement livres');
+    console.log('🌐 API Call:', fullEndpoint);
+    console.time('⏱ Chargement livres');
     
     try {
-        const response = await callApi(`${endpoint}?${queryString.toString()}`, 'GET', null, true, true);
+        const response = await callApi(fullEndpoint, 'GET', null, true, false); // ✅ Désactiver le cache pour debug
+        
+        console.log('✅ API Response received:', response);
+        
         let books = isWishlist ? response.wishlist_books : response.books;
         const stats = response.stats;
 
-        console.timeEnd('Chargement livres');
+        console.timeEnd('⏱ Chargement livres');
+        console.log('📊 Books count:', books ? books.length : 0);
+        console.log('📊 Stats:', stats);
         
-        totalItems = stats.total || 0;
+        totalItems = stats?.total || 0;
         totalPages = itemsPerPage >= 1000 ? 1 : Math.ceil(totalItems / itemsPerPage);
         
-        renderPaginationInfo(books.length);
+        renderPaginationInfo(books ? books.length : 0);
         
         let html = '';
+        
+        // Stats bar
         if (!isWishlist && stats) {
             html += `
                 <div class="stats-bar">
-                    <span><strong>${stats.total}</strong> livres</span>
-                    <span>📚 Jérémy: <strong>${stats.mes_livres}</strong></span>
-                    <span>📚 Kelly: <strong>${stats.livres_k}</strong></span>
-                    <span>📖 À lire: <strong>${stats.a_lire}</strong></span>
-                    <span>📚 En cours: <strong>${stats.en_cours}</strong></span>
-                    <span>✅ Lus: <strong>${stats.lus}</strong></span>
+                    <span><strong>${stats.total || 0}</strong> livres</span>
+                    <span>📚 Jérémy: <strong>${stats.mes_livres || 0}</strong></span>
+                    <span>📚 Kelly: <strong>${stats.livres_k || 0}</strong></span>
+                    <span>📖 À lire: <strong>${stats.a_lire || 0}</strong></span>
+                    <span>📚 En cours: <strong>${stats.en_cours || 0}</strong></span>
+                    <span>✅ Lus: <strong>${stats.lus || 0}</strong></span>
                     ${stats.note_moyenne ? `<span>⭐ Moyenne: <strong>${stats.note_moyenne}/5</strong></span>` : ''}
                 </div>
             `;
         } else if (isWishlist && stats) {
             html += `
                 <div class="stats-bar">
-                    <span><strong>${stats.total}</strong> souhaits</span>
-                    <span>💖 Jérémy: <strong>${stats.mes_souhaits}</strong></span>
-                    <span>💖 Kelly: <strong>${stats.souhaits_k}</strong></span>
+                    <span><strong>${stats.total || 0}</strong> souhaits</span>
+                    <span>💖 Jérémy: <strong>${stats.mes_souhaits || 0}</strong></span>
+                    <span>💖 Kelly: <strong>${stats.souhaits_k || 0}</strong></span>
                 </div>
             `;
         }
 
-        if (books.length === 0) {
+        if (!books || books.length === 0) {
             html += `
                 <div class="empty-state">
                     <i class="fas fa-book-open fa-3x"></i>
@@ -903,7 +954,7 @@ async function fetchAndRenderBooks(isWishlist) {
                     <tr>
                         <td class="book-title">${escapeHtml(book.titre)}</td>
                         <td>${escapeHtml(book.auteur)}</td>
-                        <td><span class="badge">${book.proprietaire}</span></td>
+                        <td><span class="badge">${escapeHtml(book.proprietaire)}</span></td>
                         ${!isWishlist ? `<td>${noteStars} ${book.note || 0}/5</td>` : ''}
                         ${!isWishlist ? `<td><span class="status-badge status-${book.statut_lecture}">${formatStatut(book.statut_lecture)}</span></td>` : ''}
                         ${!isWishlist ? `<td class="tags-cell">${tags.map(tag => `<span class="tag-mini">${escapeHtml(tag.name)}</span>`).join(' ')}</td>` : ''}
@@ -916,10 +967,10 @@ async function fetchAndRenderBooks(isWishlist) {
                                 <i class="fas fa-arrow-right"></i>
                             </button>` : ''}
                             ${!isWishlist ? `
-                            <button class="btn-loan" onclick="createLoanForBook(${book.id}, '${escapeHtml(book.titre)}')" title="Prêter">
+                            <button class="btn-loan" onclick="createLoanForBook(${book.id}, '${escapeHtml(book.titre).replace(/'/g, "\\'")}')">
                                 <i class="fas fa-handshake"></i>
                             </button>` : ''}
-                            <button class="btn-delete" onclick="deleteBookWithConfirm(${book.id}, ${isWishlist}, '${escapeHtml(book.titre)}')" title="Supprimer">
+                            <button class="btn-delete" onclick="deleteBookWithConfirm(${book.id}, ${isWishlist}, '${escapeHtml(book.titre).replace(/'/g, "\\'")}')">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </td>
@@ -937,9 +988,15 @@ async function fetchAndRenderBooks(isWishlist) {
         bookListContent.innerHTML = html;
         renderPaginationControls(isWishlist);
 
-        document.querySelectorAll('.book-table th.sortable').forEach(header => {
+        // Attacher les event listeners pour le tri
+        const sortableHeaders = document.querySelectorAll('.book-table th.sortable');
+        console.log('🔧 Attaching sort listeners to', sortableHeaders.length, 'headers');
+        
+        sortableHeaders.forEach(header => {
             header.addEventListener('click', () => {
                 const column = header.dataset.sort;
+                console.log('🔀 Sorting by', column);
+                
                 if (currentSortColumn === column) {
                     currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
                 } else {
@@ -952,6 +1009,9 @@ async function fetchAndRenderBooks(isWishlist) {
         });
 
     } catch (error) {
+        console.error('❌ Error fetching books:', error);
+        console.timeEnd('⏱ Chargement livres');
+        
         bookListContent.innerHTML = `
             <div class="error-message">
                 <i class="fas fa-exclamation-triangle"></i>
