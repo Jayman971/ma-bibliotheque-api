@@ -1,4 +1,4 @@
-# api_biblio.py - Version CORRIGÉE avec gestion des migrations
+# api_biblio.py - Version NETTOYÉE sans tags ni catégories
 
 from flask import Flask, request, jsonify
 from functools import wraps
@@ -144,19 +144,8 @@ def get_db_connection():
     conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
     return conn
 
-def column_exists(cur, table_name, column_name):
-    """Vérifie si une colonne existe dans une table"""
-    cur.execute("""
-        SELECT EXISTS (
-            SELECT 1 
-            FROM information_schema.columns 
-            WHERE table_name = %s AND column_name = %s
-        )
-    """, (table_name, column_name))
-    return cur.fetchone()['exists']
-
 def create_tables():
-    """Crée toutes les tables nécessaires avec gestion des migrations"""
+    """Crée toutes les tables nécessaires"""
     conn = get_db_connection()
     with conn.cursor() as cur:
         # ✅ Table des livres
@@ -170,40 +159,6 @@ def create_tables():
                 statut_lecture TEXT DEFAULT 'lu',
                 est_wishlist INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # ✅ Ajouter category_id si elle n'existe pas (migration)
-        if not column_exists(cur, 'livres', 'category_id'):
-            cur.execute('ALTER TABLE livres ADD COLUMN category_id INTEGER')
-            print("✅ Colonne category_id ajoutée à la table livres")
-        
-        # ✅ Table des catégories
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS categories (
-                id SERIAL PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE,
-                parent_id INTEGER,
-                FOREIGN KEY (parent_id) REFERENCES categories(id) ON DELETE SET NULL
-            )
-        ''')
-        
-        # ✅ Table des tags
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS tags (
-                id SERIAL PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE
-            )
-        ''')
-        
-        # ✅ Table de liaison livres-tags
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS book_tags (
-                book_id INTEGER NOT NULL,
-                tag_id INTEGER NOT NULL,
-                PRIMARY KEY (book_id, tag_id),
-                FOREIGN KEY (book_id) REFERENCES livres(id) ON DELETE CASCADE,
-                FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
             )
         ''')
         
@@ -257,16 +212,12 @@ def create_tables():
             )
         ''')
         
-        # ✅ Index pour améliorer les performances (seulement si les colonnes existent)
+        # ✅ Index pour améliorer les performances
         cur.execute('CREATE INDEX IF NOT EXISTS idx_est_wishlist ON livres(est_wishlist)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_proprietaire ON livres(proprietaire)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_statut_lecture ON livres(statut_lecture)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_titre ON livres(titre)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_auteur ON livres(auteur)')
-        
-        # Créer l'index sur category_id seulement si la colonne existe
-        if column_exists(cur, 'livres', 'category_id'):
-            cur.execute('CREATE INDEX IF NOT EXISTS idx_category_id ON livres(category_id)')
         
         cur.execute('CREATE INDEX IF NOT EXISTS idx_loan_status ON loans(status)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_loan_book_id ON loans(book_id)')
@@ -278,7 +229,7 @@ def create_tables():
 create_tables()
 
 def get_book_by_id_helper(book_id, is_wishlist=None):
-    """Récupère un livre spécifique par ID avec ses tags"""
+    """Récupère un livre spécifique par ID"""
     conn = get_db_connection()
     with conn.cursor() as cur:
         query = 'SELECT * FROM livres WHERE id = %s'
@@ -288,17 +239,6 @@ def get_book_by_id_helper(book_id, is_wishlist=None):
             params.append(1 if is_wishlist else 0)
         cur.execute(query, params)
         book = cur.fetchone()
-        
-        if book:
-            # Récupérer les tags du livre
-            cur.execute('''
-                SELECT t.id, t.name
-                FROM tags t
-                JOIN book_tags bt ON t.id = bt.tag_id
-                WHERE bt.book_id = %s
-            ''', [book_id])
-            tags = cur.fetchall()
-            book['tags'] = tags
     conn.close()
     return book if book else None
 
@@ -338,180 +278,6 @@ def autocomplete_search():
     set_in_cache(cache_key, response)
     
     return jsonify_with_transform(response), 200
-
-# ====== GESTION DES CATÉGORIES ======
-
-@app.route('/api/v1/categories', methods=['GET'])
-@api_key_required
-def get_categories():
-    """Récupère toutes les catégories avec hiérarchie"""
-    cache_key = 'all_categories'
-    cached_data = get_from_cache(cache_key)
-    if cached_data:
-        return jsonify_with_transform(cached_data), 200
-    
-    conn = get_db_connection()
-    with conn.cursor() as cur:
-        cur.execute('SELECT * FROM categories ORDER BY name ASC')
-        categories = cur.fetchall()
-    conn.close()
-    
-    result = {'categories': categories}
-    set_in_cache(cache_key, result)
-    
-    return jsonify_with_transform(result), 200
-
-@app.route('/api/v1/categories', methods=['POST'])
-@api_key_required
-def create_category():
-    """Créer une nouvelle catégorie"""
-    data = request.get_json()
-    name = data.get('name')
-    parent_id = data.get('parent_id')
-    
-    if not name:
-        return jsonify_with_transform({'message': 'Le nom de la catégorie est obligatoire'}), 400
-    
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                'INSERT INTO categories (name, parent_id) VALUES (%s, %s) RETURNING id',
-                (name, parent_id)
-            )
-            new_category_id = cur.fetchone()['id']
-            conn.commit()
-        conn.close()
-        clear_cache()
-        return jsonify_with_transform({'message': 'Catégorie créée avec succès', 'id': new_category_id}), 201
-    except Exception as e:
-        conn.rollback()
-        conn.close()
-        return jsonify_with_transform({'message': f'Erreur: {str(e)}'}), 500
-
-@app.route('/api/v1/categories/<int:category_id>', methods=['DELETE'])
-@api_key_required
-def delete_category(category_id):
-    """Supprimer une catégorie"""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute('DELETE FROM categories WHERE id = %s', (category_id,))
-            conn.commit()
-        conn.close()
-        clear_cache()
-        return jsonify_with_transform({'message': 'Catégorie supprimée avec succès'}), 200
-    except Exception as e:
-        conn.rollback()
-        conn.close()
-        return jsonify_with_transform({'message': f'Erreur: {str(e)}'}), 500
-
-# ====== GESTION DES TAGS ======
-
-@app.route('/api/v1/tags', methods=['GET'])
-@api_key_required
-def get_tags():
-    """Récupère tous les tags"""
-    cache_key = 'all_tags'
-    cached_data = get_from_cache(cache_key)
-    if cached_data:
-        return jsonify_with_transform(cached_data), 200
-    
-    conn = get_db_connection()
-    with conn.cursor() as cur:
-        cur.execute('SELECT * FROM tags ORDER BY name ASC')
-        tags = cur.fetchall()
-    conn.close()
-    
-    result = {'tags': tags}
-    set_in_cache(cache_key, result)
-    
-    return jsonify_with_transform(result), 200
-
-@app.route('/api/v1/tags', methods=['POST'])
-@api_key_required
-def create_tag():
-    """Créer un nouveau tag"""
-    data = request.get_json()
-    name = data.get('name', '').strip().lower()
-    
-    if not name:
-        return jsonify_with_transform({'message': 'Le nom du tag est obligatoire'}), 400
-    
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            # Vérifier si le tag existe déjà
-            cur.execute('SELECT id FROM tags WHERE name = %s', (name,))
-            existing_tag = cur.fetchone()
-            
-            if existing_tag:
-                return jsonify_with_transform({'message': 'Tag déjà existant', 'id': existing_tag['id']}), 200
-            
-            cur.execute('INSERT INTO tags (name) VALUES (%s) RETURNING id', (name,))
-            new_tag_id = cur.fetchone()['id']
-            conn.commit()
-        conn.close()
-        clear_cache()
-        return jsonify_with_transform({'message': 'Tag créé avec succès', 'id': new_tag_id}), 201
-    except Exception as e:
-        conn.rollback()
-        conn.close()
-        return jsonify_with_transform({'message': f'Erreur: {str(e)}'}), 500
-
-@app.route('/api/v1/books/<int:book_id>/tags', methods=['POST'])
-@api_key_required
-def add_tag_to_book(book_id):
-    """Ajouter un tag à un livre"""
-    data = request.get_json()
-    tag_name = data.get('tag', '').strip().lower()
-    
-    if not tag_name:
-        return jsonify_with_transform({'message': 'Le nom du tag est obligatoire'}), 400
-    
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            # Créer le tag s'il n'existe pas
-            cur.execute('SELECT id FROM tags WHERE name = %s', (tag_name,))
-            tag = cur.fetchone()
-            
-            if not tag:
-                cur.execute('INSERT INTO tags (name) VALUES (%s) RETURNING id', (tag_name,))
-                tag_id = cur.fetchone()['id']
-            else:
-                tag_id = tag['id']
-            
-            # Associer le tag au livre
-            cur.execute(
-                'INSERT INTO book_tags (book_id, tag_id) VALUES (%s, %s) ON CONFLICT DO NOTHING',
-                (book_id, tag_id)
-            )
-            conn.commit()
-        conn.close()
-        clear_cache()
-        return jsonify_with_transform({'message': 'Tag ajouté au livre avec succès'}), 200
-    except Exception as e:
-        conn.rollback()
-        conn.close()
-        return jsonify_with_transform({'message': f'Erreur: {str(e)}'}), 500
-
-@app.route('/api/v1/books/<int:book_id>/tags/<int:tag_id>', methods=['DELETE'])
-@api_key_required
-def remove_tag_from_book(book_id, tag_id):
-    """Retirer un tag d'un livre"""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute('DELETE FROM book_tags WHERE book_id = %s AND tag_id = %s', (book_id, tag_id))
-            conn.commit()
-        conn.close()
-        clear_cache()
-        return jsonify_with_transform({'message': 'Tag retiré du livre avec succès'}), 200
-    except Exception as e:
-        conn.rollback()
-        conn.close()
-        return jsonify_with_transform({'message': f'Erreur: {str(e)}'}), 500
 
 # ====== GESTION DES UTILISATEURS ======
 
@@ -809,8 +575,6 @@ def get_recommendations(user_id):
     Système de recommandation basé sur:
     1. Les livres lus par l'utilisateur
     2. Les notes qu'il a données
-    3. Les tags des livres qu'il a aimés
-    4. Filtrage collaboratif simple
     """
     limit = int(request.args.get('limit', 5))
     
@@ -844,52 +608,18 @@ def get_recommendations(user_id):
             ''', (limit,))
             recommendations = cur.fetchall()
         else:
-            # 2. Analyser les préférences (tags des livres bien notés)
-            book_ids_liked = [h['book_id'] for h in user_history if h.get('rating', 0) >= 4]
-            
-            if book_ids_liked:
-                # Récupérer les tags des livres aimés
-                cur.execute('''
-                    SELECT t.name, COUNT(*) as count
-                    FROM book_tags bt
-                    JOIN tags t ON bt.tag_id = t.id
-                    WHERE bt.book_id = ANY(%s)
-                    GROUP BY t.name
-                    ORDER BY count DESC
-                    LIMIT 5
-                ''', (book_ids_liked,))
-                preferred_tags = [row['name'] for row in cur.fetchall()]
-                
-                # Recommander des livres avec des tags similaires
-                cur.execute('''
-                    SELECT DISTINCT l.id, l.titre, l.auteur, l.proprietaire,
-                           COUNT(bt.tag_id) as matching_tags
-                    FROM livres l
-                    JOIN book_tags bt ON l.id = bt.book_id
-                    JOIN tags t ON bt.tag_id = t.id
-                    WHERE t.name = ANY(%s)
-                      AND l.est_wishlist = 0
-                      AND l.id NOT IN (
-                          SELECT book_id FROM loans WHERE user_id = %s
-                      )
-                    GROUP BY l.id
-                    ORDER BY matching_tags DESC, l.note DESC
-                    LIMIT %s
-                ''', (preferred_tags, user_id, limit))
-                recommendations = cur.fetchall()
-            else:
-                # Recommander des livres populaires non empruntés
-                cur.execute('''
-                    SELECT l.id, l.titre, l.auteur, l.proprietaire, l.note
-                    FROM livres l
-                    WHERE l.est_wishlist = 0
-                      AND l.id NOT IN (
-                          SELECT book_id FROM loans WHERE user_id = %s
-                      )
-                    ORDER BY l.note DESC
-                    LIMIT %s
-                ''', (user_id, limit))
-                recommendations = cur.fetchall()
+            # Recommander des livres populaires non empruntés
+            cur.execute('''
+                SELECT l.id, l.titre, l.auteur, l.proprietaire, l.note
+                FROM livres l
+                WHERE l.est_wishlist = 0
+                  AND l.id NOT IN (
+                      SELECT book_id FROM loans WHERE user_id = %s
+                  )
+                ORDER BY l.note DESC
+                LIMIT %s
+            ''', (user_id, limit))
+            recommendations = cur.fetchall()
     
     conn.close()
     
@@ -939,7 +669,7 @@ def add_rating():
         conn.close()
         return jsonify_with_transform({'message': f'Erreur: {str(e)}'}), 500
 
-# ====== ROUTES API POUR LES LIVRES (COLLECTION) - AVEC TAGS ======
+# ====== ROUTES API POUR LES LIVRES (COLLECTION) ======
 
 @app.route('/api/v1/stats', methods=['GET'])
 @api_key_required
@@ -991,12 +721,11 @@ def get_stats():
 @app.route('/api/v1/books', methods=['GET'])
 @api_key_required
 def get_books():
-    """Récupérer les livres avec tags et filtres"""
+    """Récupérer les livres avec filtres"""
     search_query = request.args.get('query', '').strip()
     search_by = request.args.get('search_by', 'titre')
     proprietaire_filter = request.args.get('proprietaire', '')
     statut_filter = request.args.get('statut', '')
-    tags_filter = request.getlist('tags')  # Liste de tags
     
     sort_by = request.args.get('sort_by', 'titre')
     sort_dir = request.args.get('sort_dir', 'asc').upper()
@@ -1010,7 +739,7 @@ def get_books():
     if sort_dir not in ['ASC', 'DESC']:
         sort_dir = 'ASC'
     
-    cache_key = f'books_{search_query}_{search_by}_{proprietaire_filter}_{statut_filter}_{",".join(tags_filter)}_{sort_by}_{sort_dir}_{page}_{per_page}'
+    cache_key = f'books_{search_query}_{search_by}_{proprietaire_filter}_{statut_filter}_{sort_by}_{sort_dir}_{page}_{per_page}'
     cached_data = get_from_cache(cache_key)
     if cached_data:
         return jsonify_with_transform(cached_data), 200
@@ -1018,18 +747,9 @@ def get_books():
     conn = get_db_connection()
     
     with conn.cursor() as cur:
-        sql_query = 'SELECT DISTINCT l.id, l.titre, l.auteur, l.note, l.proprietaire, l.statut_lecture, l.est_wishlist, l.category_id FROM livres l'
+        sql_query = 'SELECT l.id, l.titre, l.auteur, l.note, l.proprietaire, l.statut_lecture, l.est_wishlist FROM livres l'
         params = []
         where_clauses = ['l.est_wishlist = 0']
-        
-        # Filtre par tags
-        if tags_filter:
-            sql_query += '''
-                JOIN book_tags bt ON l.id = bt.book_id
-                JOIN tags t ON bt.tag_id = t.id
-            '''
-            where_clauses.append('t.name = ANY(%s)')
-            params.append(tags_filter)
 
         if search_query:
             if search_by == 'titre':
@@ -1055,16 +775,6 @@ def get_books():
         
         cur.execute(sql_query, params)
         livres = cur.fetchall()
-        
-        # Récupérer les tags pour chaque livre
-        for livre in livres:
-            cur.execute('''
-                SELECT t.id, t.name
-                FROM tags t
-                JOIN book_tags bt ON t.id = bt.tag_id
-                WHERE bt.book_id = %s
-            ''', [livre['id']])
-            livre['tags'] = cur.fetchall()
         
         cur.execute('''
             SELECT 
@@ -1116,8 +826,6 @@ def add_book():
     note = int(data.get('note', 0))
     proprietaire = data.get('proprietaire', 'J')
     statut_lecture = data.get('statut_lecture', 'lu')
-    category_id = data.get('category_id')
-    tags = data.get('tags', [])  # Liste de tags
     est_wishlist = 0
 
     if not titre or not auteur:
@@ -1127,28 +835,10 @@ def add_book():
     try:
         with conn.cursor() as cur:
             cur.execute(
-                'INSERT INTO livres (titre, auteur, note, proprietaire, statut_lecture, est_wishlist, category_id) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id',
-                (titre, auteur, note, proprietaire, statut_lecture, est_wishlist, category_id)
+                'INSERT INTO livres (titre, auteur, note, proprietaire, statut_lecture, est_wishlist) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id',
+                (titre, auteur, note, proprietaire, statut_lecture, est_wishlist)
             )
             new_book_id = cur.fetchone()['id']
-            
-            # Ajouter les tags
-            for tag_name in tags:
-                tag_name = tag_name.strip().lower()
-                if tag_name:
-                    # Créer le tag s'il n'existe pas
-                    cur.execute('SELECT id FROM tags WHERE name = %s', (tag_name,))
-                    tag = cur.fetchone()
-                    
-                    if not tag:
-                        cur.execute('INSERT INTO tags (name) VALUES (%s) RETURNING id', (tag_name,))
-                        tag_id = cur.fetchone()['id']
-                    else:
-                        tag_id = tag['id']
-                    
-                    # Associer le tag au livre
-                    cur.execute('INSERT INTO book_tags (book_id, tag_id) VALUES (%s, %s)', (new_book_id, tag_id))
-            
             conn.commit()
         conn.close()
         
@@ -1174,8 +864,6 @@ def update_book(book_id):
     note = int(data.get('note', 0))
     proprietaire = data.get('proprietaire')
     statut_lecture = data.get('statut_lecture')
-    category_id = data.get('category_id')
-    tags = data.get('tags')
     
     if not titre or not auteur:
         return jsonify_with_transform({'message': 'Le titre et l\'auteur sont obligatoires'}), 400
@@ -1184,30 +872,9 @@ def update_book(book_id):
     try:
         with conn.cursor() as cur:
             cur.execute(
-                'UPDATE livres SET titre = %s, auteur = %s, note = %s, proprietaire = %s, statut_lecture = %s, category_id = %s WHERE id = %s AND est_wishlist = 0',
-                (titre, auteur, note, proprietaire, statut_lecture, category_id, book_id)
+                'UPDATE livres SET titre = %s, auteur = %s, note = %s, proprietaire = %s, statut_lecture = %s WHERE id = %s AND est_wishlist = 0',
+                (titre, auteur, note, proprietaire, statut_lecture, book_id)
             )
-            
-            # Mettre à jour les tags si fournis
-            if tags is not None:
-                # Supprimer les anciens tags
-                cur.execute('DELETE FROM book_tags WHERE book_id = %s', (book_id,))
-                
-                # Ajouter les nouveaux tags
-                for tag_name in tags:
-                    tag_name = tag_name.strip().lower()
-                    if tag_name:
-                        cur.execute('SELECT id FROM tags WHERE name = %s', (tag_name,))
-                        tag = cur.fetchone()
-                        
-                        if not tag:
-                            cur.execute('INSERT INTO tags (name) VALUES (%s) RETURNING id', (tag_name,))
-                            tag_id = cur.fetchone()['id']
-                        else:
-                            tag_id = tag['id']
-                        
-                        cur.execute('INSERT INTO book_tags (book_id, tag_id) VALUES (%s, %s)', (book_id, tag_id))
-            
             conn.commit()
         conn.close()
         

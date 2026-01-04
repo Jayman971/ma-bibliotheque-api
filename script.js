@@ -18,9 +18,6 @@ let itemsPerPage = 50;
 let totalItems = 0;
 let totalPages = 0;
 
-// ✅ Variables pour les catégories
-let allCategories = [];
-
 // --- Éléments du DOM ---
 const appContainer = document.getElementById('app-container');
 const mainNav = document.getElementById('mainNav');
@@ -438,7 +435,6 @@ const pages = {
     'collection': renderBookListPage,
     'wishlist': renderBookListPage,
     'addBook': renderAddEditBookForm,
-    'tags': renderTagsPage,
     'loans': renderLoansPage,
     'recommendations': renderRecommendationsPage,
     'users': renderUsersPage,
@@ -476,7 +472,6 @@ function renderNavigation() {
             <button id="wishlistBtn"><i class="fas fa-heart"></i> Wishlist</button>
             <button id="loansBtn"><i class="fas fa-handshake"></i> Prêts</button>
             <button id="recommendationsBtn"><i class="fas fa-magic"></i> Suggestions</button>
-            <button id="tagsBtn"><i class="fas fa-tags"></i> Tags</button>
             <button id="usersBtn"><i class="fas fa-users"></i> Utilisateurs</button>
         </div>
         <div class="nav-right">
@@ -492,7 +487,6 @@ function renderNavigation() {
     document.getElementById('wishlistBtn').addEventListener('click', () => showPage('wishlist', { isWishlist: true }));
     document.getElementById('loansBtn').addEventListener('click', () => showPage('loans'));
     document.getElementById('recommendationsBtn').addEventListener('click', () => showPage('recommendations'));
-    document.getElementById('tagsBtn').addEventListener('click', () => showPage('tags'));
     document.getElementById('usersBtn').addEventListener('click', () => showPage('users'));
     document.getElementById('addBookBtn').addEventListener('click', () => openAddBookModal());
     document.getElementById('logoutBtn').addEventListener('click', logout);
@@ -695,9 +689,7 @@ async function renderHomePage() {
     }
 }
 
-// ====== PAGE DE LISTE DE LIVRES AVEC PAGINATION ET TAGS ======
-
-// ====== PAGE DE LISTE DE LIVRES AVEC PAGINATION ET TAGS ======
+// ====== PAGE DE LISTE DE LIVRES AVEC PAGINATION ======
 
 async function renderBookListPage(data) {
     const isWishlist = data.isWishlist;
@@ -873,7 +865,7 @@ async function fetchAndRenderBooks(isWishlist) {
     console.time('⏱ Chargement livres');
     
     try {
-        const response = await callApi(fullEndpoint, 'GET', null, true, false); // ✅ Désactiver le cache pour debug
+        const response = await callApi(fullEndpoint, 'GET', null, true, false);
         
         console.log('✅ API Response received:', response);
         
@@ -939,7 +931,6 @@ async function fetchAndRenderBooks(isWishlist) {
                                 </th>
                                 ${!isWishlist ? `<th class="sortable ${currentSortColumn === 'note' ? currentSortDirection : ''}" data-sort="note">Note <span class="sort-icon">${getSortIcon('note')}</span></th>` : ''}
                                 ${!isWishlist ? `<th class="sortable ${currentSortColumn === 'statut_lecture' ? currentSortDirection : ''}" data-sort="statut_lecture">Statut <span class="sort-icon">${getSortIcon('statut_lecture')}</span></th>` : ''}
-                                ${!isWishlist ? '<th>Tags</th>' : ''}
                                 <th class="actions-cell">Actions</th>
                             </tr>
                         </thead>
@@ -948,7 +939,6 @@ async function fetchAndRenderBooks(isWishlist) {
             
             books.forEach(book => {
                 const noteStars = !isWishlist && book.note ? '⭐'.repeat(book.note) : '';
-                const tags = book.tags || [];
                 
                 html += `
                     <tr>
@@ -957,7 +947,6 @@ async function fetchAndRenderBooks(isWishlist) {
                         <td><span class="badge">${escapeHtml(book.proprietaire)}</span></td>
                         ${!isWishlist ? `<td>${noteStars} ${book.note || 0}/5</td>` : ''}
                         ${!isWishlist ? `<td><span class="status-badge status-${book.statut_lecture}">${formatStatut(book.statut_lecture)}</span></td>` : ''}
-                        ${!isWishlist ? `<td class="tags-cell">${tags.map(tag => `<span class="tag-mini">${escapeHtml(tag.name)}</span>`).join(' ')}</td>` : ''}
                         <td class="actions-cell">
                             <button class="btn-edit" onclick="editBookInModal(${book.id}, ${isWishlist})" title="Modifier">
                                 <i class="fas fa-edit"></i>
@@ -1174,9 +1163,6 @@ function goToPageInput(isWishlist) {
 // ====== GESTION DES LIVRES AVEC MODAL ======
 
 async function openAddBookModal(isWishlist = false) {
-    // Charger les catégories
-    await loadCategories();
-    
     const bookForm = document.getElementById('bookForm');
     if (bookForm) {
         bookForm.reset();
@@ -1185,13 +1171,11 @@ async function openAddBookModal(isWishlist = false) {
     const bookIdInput = document.getElementById('bookId');
     const bookModalTitle = document.getElementById('bookModalTitle');
     const bookNoteInput = document.getElementById('bookNote');
-    const selectedTags = document.getElementById('selectedTags');
     const bookStatut = document.getElementById('bookStatut');
     
     if (bookIdInput) bookIdInput.value = '';
     if (bookModalTitle) bookModalTitle.textContent = 'Ajouter un nouveau livre';
     if (bookNoteInput) bookNoteInput.value = '0';
-    if (selectedTags) selectedTags.innerHTML = '';
     if (bookStatut) bookStatut.value = isWishlist ? 'a_lire' : 'lu';
     
     // Réinitialiser l'affichage des étoiles
@@ -1204,9 +1188,6 @@ async function editBookInModal(bookId, isWishlist = false) {
     showLoader('Chargement du livre...');
     
     try {
-        // Charger les catégories
-        await loadCategories();
-        
         const book = await callApi(isWishlist ? `/wishlist/${bookId}` : `/books/${bookId}`);
         
         const bookModalTitle = document.getElementById('bookModalTitle');
@@ -1216,7 +1197,6 @@ async function editBookInModal(bookId, isWishlist = false) {
         const bookNoteInput = document.getElementById('bookNote');
         const bookProprietaireSelect = document.getElementById('bookProprietaire');
         const bookStatutSelect = document.getElementById('bookStatut');
-        const bookCategorySelect = document.getElementById('bookCategory');
         
         if (bookModalTitle) bookModalTitle.textContent = `Modifier : "${book.titre}"`;
         if (bookIdInput) bookIdInput.value = book.id;
@@ -1225,21 +1205,9 @@ async function editBookInModal(bookId, isWishlist = false) {
         if (bookNoteInput) bookNoteInput.value = book.note || 0;
         if (bookProprietaireSelect) bookProprietaireSelect.value = book.proprietaire;
         if (bookStatutSelect) bookStatutSelect.value = book.statut_lecture || 'lu';
-        if (bookCategorySelect) bookCategorySelect.value = book.category_id || '';
         
         // Mettre à jour l'affichage des étoiles
         updateStarDisplay(book.note || 0);
-        
-        // Charger les tags
-        const selectedTagsContainer = document.getElementById('selectedTags');
-        if (selectedTagsContainer) {
-            selectedTagsContainer.innerHTML = '';
-            if (book.tags && book.tags.length > 0) {
-                book.tags.forEach(tag => {
-                    addTagToForm(tag.name);
-                });
-            }
-        }
         
         hideLoader();
         openModal('bookModal');
@@ -1247,48 +1215,6 @@ async function editBookInModal(bookId, isWishlist = false) {
         hideLoader();
         showToast(`Erreur lors du chargement du livre: ${error.message}`, 'error');
     }
-}
-
-async function loadCategories() {
-    try {
-        const response = await callApi('/categories', 'GET', null, true, true);
-        allCategories = response.categories || [];
-        
-        const categorySelect = document.getElementById('bookCategory');
-        if (categorySelect) {
-            categorySelect.innerHTML = '<option value="">Aucune</option>';
-            allCategories.forEach(cat => {
-                const option = document.createElement('option');
-                option.value = cat.id;
-                option.textContent = cat.name;
-                categorySelect.appendChild(option);
-            });
-        }
-    } catch (error) {
-        console.error('Erreur chargement catégories:', error);
-    }
-}
-
-function addTagToForm(tagName) {
-    const selectedTags = document.getElementById('selectedTags');
-    if (!selectedTags) return;
-    
-    // Vérifier si le tag existe déjà
-    const existingTags = Array.from(selectedTags.querySelectorAll('.tag-item')).map(tag => tag.dataset.tagName);
-    if (existingTags.includes(tagName)) {
-        showToast('Ce tag est déjà ajouté', 'info', 1500);
-        return;
-    }
-    
-    const tagElement = document.createElement('span');
-    tagElement.className = 'tag-item';
-    tagElement.dataset.tagName = tagName;
-    tagElement.innerHTML = `
-        ${escapeHtml(tagName)}
-        <button type="button" class="remove-tag" onclick="event.preventDefault(); this.parentElement.remove();">×</button>
-    `;
-    
-    selectedTags.appendChild(tagElement);
 }
 
 function updateStarDisplay(rating, isHover = false) {
@@ -1329,7 +1255,6 @@ async function handleBookFormSubmit(e) {
     const bookProprietaireSelect = document.getElementById('bookProprietaire');
     const bookNoteInput = document.getElementById('bookNote');
     const bookStatutSelect = document.getElementById('bookStatut');
-    const bookCategorySelect = document.getElementById('bookCategory');
     
     if (!bookTitreInput || !bookAuteurInput) {
         showToast('Formulaire incomplet', 'error');
@@ -1344,13 +1269,8 @@ async function handleBookFormSubmit(e) {
         auteur: bookAuteurInput.value.trim(),
         proprietaire: bookProprietaireSelect ? bookProprietaireSelect.value : 'J',
         note: bookNoteInput ? parseInt(bookNoteInput.value) || 0 : 0,
-        statut_lecture: bookStatutSelect ? bookStatutSelect.value : 'lu',
-        category_id: bookCategorySelect ? (parseInt(bookCategorySelect.value) || null) : null
+        statut_lecture: bookStatutSelect ? bookStatutSelect.value : 'lu'
     };
-    
-    // Récupérer les tags
-    const tagElements = document.querySelectorAll('#selectedTags .tag-item');
-    bookData.tags = Array.from(tagElements).map(tag => tag.dataset.tagName);
     
     showLoader(isEditing ? 'Modification en cours...' : 'Ajout en cours...');
     
@@ -1426,91 +1346,6 @@ async function moveToCollection(bookId) {
             }
         }
     );
-}
-
-// ====== PAGE DES TAGS ======
-
-async function renderTagsPage() {
-    appContainer.innerHTML = `
-        <h2>🏷 Gestion des Tags</h2>
-        
-        <div class="tags-manager">
-            <div class="add-tag-section">
-                <h3>Ajouter un nouveau tag</h3>
-                <div style="display: flex; gap: 10px;">
-                    <input type="text" id="newTagName" placeholder="Nom du tag" style="flex: 1;">
-                    <button onclick="createNewTag()"><i class="fas fa-plus"></i> Ajouter</button>
-                </div>
-            </div>
-            
-            <div id="tagsListContent">
-                <div class="spinner"></div>
-                <p>Chargement des tags...</p>
-            </div>
-        </div>
-    `;
-    
-    loadTagsList();
-}
-
-async function loadTagsList() {
-    try {
-        const response = await callApi('/tags', 'GET', null, true, false);
-        const tags = response.tags || [];
-        
-        const tagsListContent = document.getElementById('tagsListContent');
-        if (!tagsListContent) return;
-        
-        if (tags.length === 0) {
-            tagsListContent.innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-tags fa-3x"></i>
-                    <p>Aucun tag disponible</p>
-                </div>
-            `;
-        } else {
-            tagsListContent.innerHTML = `
-                <div class="tags-grid">
-                    ${tags.map(tag => `
-                        <div class="tag-card">
-                            <span class="tag-name">${escapeHtml(tag.name)}</span>
-                        </div>
-                    `).join('')}
-                </div>
-            `;
-        }
-    } catch (error) {
-        const tagsListContent = document.getElementById('tagsListContent');
-        if (tagsListContent) {
-            tagsListContent.innerHTML = `
-                <div class="error-message">
-                    <p>Erreur lors du chargement des tags</p>
-                    <button onclick="loadTagsList()">Réessayer</button>
-                </div>
-            `;
-        }
-    }
-}
-
-async function createNewTag() {
-    const input = document.getElementById('newTagName');
-    if (!input) return;
-    
-    const tagName = input.value.trim().toLowerCase();
-    
-    if (!tagName) {
-        showToast('Veuillez entrer un nom de tag', 'error');
-        return;
-    }
-    
-    try {
-        await callApi('/tags', 'POST', { name: tagName });
-        showToast('Tag créé avec succès !', 'success');
-        input.value = '';
-        loadTagsList();
-    } catch (error) {
-        // Erreur déjà gérée
-    }
 }
 
 // ====== PAGE DES PRÊTS ======
@@ -1812,7 +1647,6 @@ async function loadRecommendations() {
                         </div>
                         <p class="book-author">${escapeHtml(book.auteur)}</p>
                         <p class="book-owner">Propriétaire: ${book.proprietaire}</p>
-                        ${book.matching_tags ? `<p class="matching-info">🏷 ${book.matching_tags} tags en commun</p>` : ''}
                         <div class="recommendation-actions">
                             <button onclick="editBookInModal(${book.id}, false)">
                                 <i class="fas fa-info-circle"></i> Voir détails
@@ -1998,22 +1832,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (userForm) {
                 userForm.addEventListener('submit', handleUserFormSubmit);
                 console.log('✅ User form listener attaché');
-            }
-            
-            // Event listeners pour les tags
-            const newTagInput = document.getElementById('bookTags');
-            if (newTagInput) {
-                newTagInput.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        const tagName = e.target.value.trim().toLowerCase();
-                        if (tagName) {
-                            addTagToForm(tagName);
-                            e.target.value = '';
-                        }
-                    }
-                });
-                console.log('✅ Tags input listener attaché');
             }
             
             // Event listeners pour les étoiles
