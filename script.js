@@ -1,14 +1,14 @@
-// script.js - VERSION OPTIMISÉE POUR POSTGRESQL
-
 // --- Configuration de l'API ---
-// ✅ Utilise API_CONFIG défini dans index.html, sinon fallback
 const API_BASE_URL = typeof API_CONFIG !== 'undefined' 
     ? API_CONFIG.BASE_URL 
     : 'https://ma-bibliotheque-api.onrender.com/api/v1';
     
 const API_KEY_STORAGE_KEY = 'library_api_key';
+const DARK_MODE_KEY = 'library_dark_mode';
+const CURRENT_USER_ID_KEY = 'library_current_user_id';
 
 let currentApiKey = localStorage.getItem(API_KEY_STORAGE_KEY);
+let currentUserId = parseInt(localStorage.getItem(CURRENT_USER_ID_KEY)) || 1;
 let currentSortColumn = 'titre';
 let currentSortDirection = 'asc';
 
@@ -18,39 +18,92 @@ let itemsPerPage = 50;
 let totalItems = 0;
 let totalPages = 0;
 
+// ✅ Variables pour les catégories
+let allCategories = [];
+
 // --- Éléments du DOM ---
 const appContainer = document.getElementById('app-container');
 const mainNav = document.getElementById('mainNav');
 
 // --- Système de cache amélioré ---
 const apiCache = new Map();
-// ✅ PostgreSQL est plus performant, on peut cacher un peu plus longtemps
 const CACHE_DURATION = typeof API_CONFIG !== 'undefined' && API_CONFIG.CACHE_DURATION 
     ? API_CONFIG.CACHE_DURATION 
-    : 60000; // 60 secondes (1 minute)
+    : 60000; // 60 secondes
 
 // ✅ Loader global
 let globalLoader = null;
 
-// --- Fonctions utilitaires ---
+// ====== SYSTÈME DE TOAST NOTIFICATIONS ======
 
-function showAlert(message, type = 'success', duration = 3000) {
-    let alertDiv = document.querySelector('.alert-message');
-    if (!alertDiv) {
-        alertDiv = document.createElement('div');
-        alertDiv.classList.add('alert-message');
-        appContainer.prepend(alertDiv);
-    }
-
-    alertDiv.textContent = message;
-    alertDiv.className = `alert-message visible ${type}`;
-
+function showToast(message, type = 'info', duration = 3000) {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+    
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    
+    const icon = {
+        'success': 'fa-check-circle',
+        'error': 'fa-times-circle',
+        'warning': 'fa-exclamation-triangle',
+        'info': 'fa-info-circle'
+    }[type] || 'fa-info-circle';
+    
+    toast.innerHTML = `
+        <i class="fas ${icon}"></i>
+        <span>${message}</span>
+    `;
+    
+    container.appendChild(toast);
+    
+    // Animation d'entrée
+    setTimeout(() => toast.classList.add('show'), 10);
+    
+    // Retrait automatique
     setTimeout(() => {
-        alertDiv.classList.remove('visible');
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
     }, duration);
+    
+    // Clic pour fermer
+    toast.addEventListener('click', () => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    });
 }
 
-// ✅ Afficher/masquer le loader global
+// ====== MODE SOMBRE AMÉLIORÉ ======
+
+function initDarkMode() {
+    const savedTheme = localStorage.getItem(DARK_MODE_KEY);
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    
+    const isDark = savedTheme === 'true' || (savedTheme === null && prefersDark);
+    
+    if (isDark) {
+        document.body.classList.add('dark-mode');
+        document.body.classList.remove('light-mode');
+    } else {
+        document.body.classList.remove('dark-mode');
+        document.body.classList.add('light-mode');
+    }
+}
+
+async function saveDarkModePreference(isDark) {
+    try {
+        await callApi(`/users/${currentUserId}/preferences`, 'PUT', { dark_mode: isDark }, true, false);
+    } catch (error) {
+        console.warn('Impossible de sauvegarder la préférence:', error);
+    }
+}
+
+// ====== FONCTIONS UTILITAIRES ======
+
+function showAlert(message, type = 'success', duration = 3000) {
+    showToast(message, type, duration);
+}
+
 function showLoader(message = 'Chargement...') {
     if (!globalLoader) {
         globalLoader = document.createElement('div');
@@ -74,7 +127,62 @@ function hideLoader() {
     }
 }
 
-// ✅ AMÉLIORÉ : Appel API avec retry automatique
+// ====== GESTION DES MODALS ======
+
+function openModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+    }
+}
+
+function closeModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.style.display = 'none';
+        document.body.style.overflow = 'auto';
+    }
+}
+
+function closeBookModal() {
+    closeModal('bookModal');
+}
+
+function closeLoanModal() {
+    closeModal('loanModal');
+}
+
+function closeUserModal() {
+    closeModal('userModal');
+}
+
+function closeConfirmModal() {
+    closeModal('confirmModal');
+}
+
+// Modal de confirmation personnalisée
+function showConfirmDialog(title, message, onConfirm) {
+    document.getElementById('confirmTitle').textContent = title;
+    document.getElementById('confirmMessage').textContent = message;
+    
+    const confirmBtn = document.getElementById('confirmBtn');
+    
+    // Retirer les anciens listeners
+    const newConfirmBtn = confirmBtn.cloneNode(true);
+    confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+    
+    // Ajouter le nouveau listener
+    newConfirmBtn.addEventListener('click', () => {
+        closeConfirmModal();
+        onConfirm();
+    });
+    
+    openModal('confirmModal');
+}
+
+// ====== APPELS API ======
+
 async function callApi(endpoint, method = 'GET', data = null, needsAuth = true, useCache = false, retries = 2) {
     const headers = {
         'Content-Type': 'application/json'
@@ -91,9 +199,7 @@ async function callApi(endpoint, method = 'GET', data = null, needsAuth = true, 
 
     let finalEndpoint = endpoint;
     
-    // ✅ Cache uniquement pour les GET
     if (method === 'GET') {
-        // Anti-cache timestamp uniquement si pas de cache utilisé
         if (!useCache) {
             const separator = endpoint.includes('?') ? '&' : '?';
             finalEndpoint = `${endpoint}${separator}_t=${Date.now()}`;
@@ -117,7 +223,6 @@ async function callApi(endpoint, method = 'GET', data = null, needsAuth = true, 
         options.body = JSON.stringify(data);
     }
 
-    // ✅ Retry logic avec backoff exponentiel
     for (let attempt = 0; attempt <= retries; attempt++) {
         try {
             console.time(`API ${method} ${endpoint}`);
@@ -137,7 +242,6 @@ async function callApi(endpoint, method = 'GET', data = null, needsAuth = true, 
             
             const result = await response.json();
             
-            // ✅ Mettre en cache les GET
             if (method === 'GET' && useCache) {
                 apiCache.set(endpoint, {
                     data: result,
@@ -146,8 +250,7 @@ async function callApi(endpoint, method = 'GET', data = null, needsAuth = true, 
                 console.log('💾 Mise en cache:', endpoint);
             }
             
-            // ✅ Invalider le cache pour les modifications
-            if (method === 'POST' || method === 'PUT' || method === 'DELETE') {
+            if (method === 'POST' || method === 'PUT' || method === 'DELETE' || method === 'PATCH') {
                 clearCache();
             }
             
@@ -156,13 +259,11 @@ async function callApi(endpoint, method = 'GET', data = null, needsAuth = true, 
         } catch (error) {
             console.error(`Tentative ${attempt + 1}/${retries + 1} échouée:`, error);
             
-            // Si c'est la dernière tentative, on lance l'erreur
             if (attempt === retries) {
                 showAlert(`Erreur API : ${error.message}`, 'error');
                 throw error;
             }
             
-            // ✅ Backoff exponentiel : attendre 1s, puis 2s, puis 4s...
             await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt)));
         }
     }
@@ -173,13 +274,11 @@ function clearCache() {
     console.log('🗑 Cache vidé');
 }
 
-// ✅ Vérifier la santé de l'API (compatible PostgreSQL)
 async function checkApiHealth() {
     try {
-        // ✅ Utilise l'URL de base pour construire l'endpoint health
         const healthUrl = API_BASE_URL.replace('/api/v1', '/api/v1/health');
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000); // Timeout 5s
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
         
         const health = await fetch(healthUrl, { signal: controller.signal });
         clearTimeout(timeoutId);
@@ -187,7 +286,6 @@ async function checkApiHealth() {
         const data = await health.json();
         console.log('✅ API Health:', data);
         
-        // ✅ Vérification compatible PostgreSQL
         return data.status === 'healthy' && data.database === 'connected';
     } catch (error) {
         console.error('❌ API Health check failed:', error);
@@ -195,12 +293,137 @@ async function checkApiHealth() {
     }
 }
 
-// --- Système de routage/pages ---
+// ====== STATS RAPIDES POUR LE FOOTER ======
+
+async function getQuickStats() {
+    try {
+        const statsResponse = await callApi('/stats', 'GET', null, true, true);
+        const loansResponse = await callApi('/loans?status=active', 'GET', null, true, true);
+        
+        return {
+            total: statsResponse.collection?.total || 0,
+            loans: loansResponse.loans?.length || 0
+        };
+    } catch (error) {
+        return { total: 0, loans: 0 };
+    }
+}
+
+// ====== NOTIFICATIONS DES PRÊTS EN RETARD ======
+
+async function checkOverdueLoans() {
+    try {
+        const response = await callApi('/loans?status=overdue', 'GET', null, true, false);
+        const overdueLoans = response.loans || [];
+        
+        const badge = document.getElementById('notificationBadge');
+        const btn = document.getElementById('notificationsBtn');
+        
+        if (overdueLoans.length > 0) {
+            badge.textContent = overdueLoans.length;
+            badge.style.display = 'block';
+            btn.style.display = 'block';
+            
+            btn.onclick = () => {
+                showAlert(`⚠ ${overdueLoans.length} prêt(s) en retard !`, 'warning', 3000);
+                showPage('loans');
+            };
+        } else {
+            badge.style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Erreur vérification prêts en retard:', error);
+    }
+}
+
+// ====== AUTOCOMPLÉTION ======
+
+let autocompleteTimeout = null;
+let autocompleteContainer = null;
+
+function initAutocomplete(inputId, onSelect) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    
+    // Créer le conteneur d'autocomplétion
+    autocompleteContainer = document.createElement('div');
+    autocompleteContainer.className = 'autocomplete-suggestions';
+    input.parentNode.appendChild(autocompleteContainer);
+    
+    input.addEventListener('input', (e) => {
+        const query = e.target.value.trim();
+        
+        clearTimeout(autocompleteTimeout);
+        
+        if (query.length < 2) {
+            autocompleteContainer.innerHTML = '';
+            autocompleteContainer.style.display = 'none';
+            return;
+        }
+        
+        const delay = typeof API_CONFIG !== 'undefined' && API_CONFIG.AUTOCOMPLETE_DELAY 
+            ? API_CONFIG.AUTOCOMPLETE_DELAY 
+            : 300;
+        
+        autocompleteTimeout = setTimeout(async () => {
+            try {
+                const response = await callApi(`/search/autocomplete?q=${encodeURIComponent(query)}`, 'GET', null, true, true);
+                displayAutocompleteSuggestions(response.suggestions, onSelect);
+            } catch (error) {
+                console.error('Erreur autocomplétion:', error);
+            }
+        }, delay);
+    });
+    
+    // Fermer l'autocomplétion si on clique ailleurs
+    document.addEventListener('click', (e) => {
+        if (!input.contains(e.target) && !autocompleteContainer.contains(e.target)) {
+            autocompleteContainer.style.display = 'none';
+        }
+    });
+}
+
+function displayAutocompleteSuggestions(suggestions, onSelect) {
+    if (!suggestions || suggestions.length === 0) {
+        autocompleteContainer.innerHTML = '<div class="autocomplete-item">Aucun résultat</div>';
+        autocompleteContainer.style.display = 'block';
+        return;
+    }
+    
+    autocompleteContainer.innerHTML = suggestions.map(book => `
+        <div class="autocomplete-item" data-book-id="${book.id}">
+            <div class="autocomplete-title">${escapeHtml(book.titre)}</div>
+            <div class="autocomplete-author">${escapeHtml(book.auteur)} • ${book.proprietaire}</div>
+            <div class="autocomplete-type">${book.est_wishlist ? '💖 Wishlist' : '📚 Collection'}</div>
+        </div>
+    `).join('');
+    
+    autocompleteContainer.style.display = 'block';
+    
+    // Ajouter les événements de clic
+    autocompleteContainer.querySelectorAll('.autocomplete-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const bookId = item.dataset.bookId;
+            const book = suggestions.find(b => b.id == bookId);
+            if (onSelect && book) {
+                onSelect(book);
+            }
+            autocompleteContainer.style.display = 'none';
+        });
+    });
+}
+
+// ====== SYSTÈME DE ROUTAGE/PAGES ======
+
 const pages = {
     'home': renderHomePage,
     'collection': renderBookListPage,
     'wishlist': renderBookListPage,
     'addBook': renderAddEditBookForm,
+    'tags': renderTagsPage,
+    'loans': renderLoansPage,
+    'recommendations': renderRecommendationsPage,
+    'users': renderUsersPage,
     'login': renderLoginPage
 };
 
@@ -210,18 +433,12 @@ function showPage(pageName, data = {}) {
         return;
     }
     
-    // ✅ Réinitialiser la pagination lors du changement de page
     currentPage = 1;
     
     document.querySelectorAll('#mainNav button').forEach(btn => btn.classList.remove('active'));
     const currentButton = document.getElementById(`${pageName}Btn`);
     if (currentButton) {
         currentButton.classList.add('active');
-    }
-
-    const existingAlert = document.querySelector('.alert-message');
-    if (existingAlert) {
-        existingAlert.remove();
     }
 
     if (pages[pageName]) {
@@ -231,24 +448,51 @@ function showPage(pageName, data = {}) {
     }
 }
 
-// --- Rendu de la navigation ---
+// ====== NAVIGATION ======
+
 function renderNavigation() {
     mainNav.innerHTML = `
-        <button id="homeBtn"><i class="fas fa-home"></i> Accueil</button>
-        <button id="collectionBtn"><i class="fas fa-book"></i> Ma Collection</button>
-        <button id="wishlistBtn"><i class="fas fa-heart"></i> Ma Wishlist</button>
-        <button id="addBookBtn"><i class="fas fa-plus"></i> Ajouter un Livre</button>
-        <button id="logoutBtn"><i class="fas fa-sign-out-alt"></i> Déconnexion</button>
+        <div class="nav-left">
+            <button id="homeBtn"><i class="fas fa-home"></i> Accueil</button>
+            <button id="collectionBtn"><i class="fas fa-book"></i> Collection</button>
+            <button id="wishlistBtn"><i class="fas fa-heart"></i> Wishlist</button>
+            <button id="loansBtn"><i class="fas fa-handshake"></i> Prêts</button>
+            <button id="recommendationsBtn"><i class="fas fa-magic"></i> Suggestions</button>
+            <button id="tagsBtn"><i class="fas fa-tags"></i> Tags</button>
+            <button id="usersBtn"><i class="fas fa-users"></i> Utilisateurs</button>
+        </div>
+        <div class="nav-right">
+            <button id="addBookBtn" class="btn-primary"><i class="fas fa-plus"></i> Ajouter</button>
+            <button id="logoutBtn" class="icon-btn" title="Déconnexion">
+                <i class="fas fa-sign-out-alt"></i>
+            </button>
+        </div>
     `;
 
     document.getElementById('homeBtn').addEventListener('click', () => showPage('home'));
     document.getElementById('collectionBtn').addEventListener('click', () => showPage('collection', { isWishlist: false }));
     document.getElementById('wishlistBtn').addEventListener('click', () => showPage('wishlist', { isWishlist: true }));
-    document.getElementById('addBookBtn').addEventListener('click', () => showPage('addBook'));
+    document.getElementById('loansBtn').addEventListener('click', () => showPage('loans'));
+    document.getElementById('recommendationsBtn').addEventListener('click', () => showPage('recommendations'));
+    document.getElementById('tagsBtn').addEventListener('click', () => showPage('tags'));
+    document.getElementById('usersBtn').addEventListener('click', () => showPage('users'));
+    document.getElementById('addBookBtn').addEventListener('click', () => openAddBookModal());
     document.getElementById('logoutBtn').addEventListener('click', logout);
+    
+    // Vérifier les prêts en retard
+    checkOverdueLoans();
+    setInterval(checkOverdueLoans, 300000); // Toutes les 5 minutes
+    
+    // Afficher le bouton profil
+    const profileBtn = document.getElementById('userProfileBtn');
+    if (profileBtn) {
+        profileBtn.style.display = 'block';
+        profileBtn.onclick = () => showPage('users');
+    }
 }
 
-// --- Page de connexion ---
+// ====== PAGE DE CONNEXION ======
+
 function renderLoginPage() {
     mainNav.innerHTML = '';
     appContainer.innerHTML = `
@@ -271,13 +515,12 @@ function renderLoginPage() {
     
     document.getElementById('loginForm').addEventListener('submit', handleLogin);
     
-    // ✅ Vérifier la santé de l'API
     checkApiHealth().then(isHealthy => {
         const statusDiv = document.getElementById('apiStatus');
         if (isHealthy) {
-            statusDiv.innerHTML = '<p style="color: green;">✅ API connectée et prête (PostgreSQL)</p>';
+            statusDiv.innerHTML = '<p style="color: green;">✅ API connectée (PostgreSQL)</p>';
         } else {
-            statusDiv.innerHTML = '<p style="color: orange;">⚠ L\'API semble indisponible. Veuillez réessayer.</p>';
+            statusDiv.innerHTML = '<p style="color: orange;">⚠ L\'API semble indisponible.</p>';
         }
     });
 }
@@ -293,13 +536,25 @@ async function handleLogin(event) {
         const response = await callApi('/login', 'POST', { username, password }, false);
         currentApiKey = response.api_key;
         localStorage.setItem(API_KEY_STORAGE_KEY, currentApiKey);
+        
+        // Charger les préférences utilisateur
+        try {
+            const prefs = await callApi(`/users/${currentUserId}/preferences`, 'GET', null, true, false);
+            if (prefs.dark_mode) {
+                document.body.classList.add('dark-mode');
+                document.body.classList.remove('light-mode');
+                localStorage.setItem(DARK_MODE_KEY, 'true');
+            }
+        } catch (error) {
+            console.warn('Impossible de charger les préférences:', error);
+        }
+        
         hideLoader();
-        showAlert('Connexion réussie !', 'success');
+        showToast('Connexion réussie !', 'success');
         renderNavigation();
         showPage('home');
     } catch (error) {
         hideLoader();
-        // Erreur déjà gérée par callApi
     }
 }
 
@@ -307,16 +562,30 @@ function logout() {
     currentApiKey = null;
     localStorage.removeItem(API_KEY_STORAGE_KEY);
     clearCache();
-    showAlert('Vous avez été déconnecté.', 'info');
+    showToast('Vous avez été déconnecté.', 'info');
     showPage('login');
 }
 
-// --- Page d'accueil ---
+// ====== PAGE D'ACCUEIL ======
+
 async function renderHomePage() {
     appContainer.innerHTML = `
         <div class="homepage">
             <h2>📚 Bienvenue dans votre Bibliothèque !</h2>
             <p class="tagline">Organisez, découvrez, et partagez vos lectures préférées.</p>
+            
+            <div class="quick-search">
+                <h3>🔍 Recherche rapide</h3>
+                <div style="position: relative;">
+                    <input 
+                        type="text" 
+                        id="quickSearch" 
+                        placeholder="Rechercher un livre par titre ou auteur..."
+                        class="search-input-large"
+                    >
+                </div>
+            </div>
+            
             <div id="homeStats" class="welcome-stats">
                 <div class="spinner"></div>
                 <p>Chargement des statistiques...</p>
@@ -324,10 +593,18 @@ async function renderHomePage() {
         </div>
     `;
     
+    // Initialiser l'autocomplétion
+    initAutocomplete('quickSearch', (book) => {
+        if (book.est_wishlist) {
+            editBookInModal(book.id, true);
+        } else {
+            editBookInModal(book.id, false);
+        }
+    });
+    
     console.time('Chargement stats');
     
     try {
-        // ✅ Utilisation de l'endpoint /stats optimisé avec cache
         const stats = await callApi('/stats', 'GET', null, true, true);
         
         const collectionStats = stats.collection || {};
@@ -349,13 +626,13 @@ async function renderHomePage() {
             </div>
             <div class="stat-card">
                 <i class="fas fa-user-alt icon"></i>
-                <h4>Livres de J</h4>
+                <h4>Livres de Jérémy</h4>
                 <p class="stat-number">${(collectionStats.mes_livres || 0) + (wishlistStats.mes_souhaits || 0)}</p>
                 <small>au total</small>
             </div>
             <div class="stat-card">
                 <i class="fas fa-user-friends icon"></i>
-                <h4>Livres de K</h4>
+                <h4>Livres de Kelly</h4>
                 <p class="stat-number">${(collectionStats.livres_k || 0) + (wishlistStats.souhaits_k || 0)}</p>
                 <small>au total</small>
             </div>
@@ -400,7 +677,8 @@ async function renderHomePage() {
     }
 }
 
-// --- Page de liste de livres avec PAGINATION ---
+// ====== PAGE DE LISTE DE LIVRES AVEC PAGINATION ET TAGS ======
+
 async function renderBookListPage(data) {
     const isWishlist = data.isWishlist;
     const pageTitle = isWishlist ? '💖 Ma Wishlist' : '📚 Ma Collection de Livres';
@@ -409,7 +687,7 @@ async function renderBookListPage(data) {
     appContainer.innerHTML = `
         <h2>${pageTitle}</h2>
         <div class="filter-sort-section">
-            <div>
+            <div style="position: relative; flex: 2;">
                 <label for="searchQuery">🔍 Rechercher:</label>
                 <input type="text" id="searchQuery" placeholder="Titre ou Auteur">
             </div>
@@ -425,8 +703,8 @@ async function renderBookListPage(data) {
                 <label for="proprietaireFilter">👤 Propriétaire:</label>
                 <select id="proprietaireFilter">
                     <option value="">Tous</option>
-                    <option value="J">J</option>
-                    <option value="K">K</option>
+                    <option value="J">Jérémy</option>
+                    <option value="K">Kelly</option>
                 </select>
             </div>
             <div>
@@ -475,7 +753,7 @@ async function renderBookListPage(data) {
     document.getElementById('refreshBtn').addEventListener('click', () => {
         clearCache();
         fetchAndRenderBooks(isWishlist);
-        showAlert('Données actualisées !', 'info', 1500);
+        showToast('Données actualisées !', 'info', 1500);
     });
     
     document.getElementById('itemsPerPageSelect').addEventListener('change', (e) => {
@@ -490,11 +768,19 @@ async function renderBookListPage(data) {
             fetchAndRenderBooks(isWishlist);
         }
     });
+    
+    // Initialiser l'autocomplétion sur le champ de recherche
+    initAutocomplete('searchQuery', (book) => {
+        if (book.est_wishlist === (isWishlist ? 1 : 0)) {
+            editBookInModal(book.id, isWishlist);
+        } else {
+            showToast('Ce livre est dans ' + (book.est_wishlist ? 'la wishlist' : 'la collection'), 'info');
+        }
+    });
 
     fetchAndRenderBooks(isWishlist);
 }
 
-// ✅ Chargement avec pagination
 async function fetchAndRenderBooks(isWishlist) {
     const bookListContent = document.getElementById('bookListContent');
     bookListContent.innerHTML = '<div class="spinner"></div><p>Chargement des livres...</p>';
@@ -516,7 +802,6 @@ async function fetchAndRenderBooks(isWishlist) {
         queryString.append('statut', statutFilter);
     }
     
-    // ✅ Paramètres de tri et pagination
     queryString.append('sort_by', currentSortColumn);
     queryString.append('sort_dir', currentSortDirection);
     queryString.append('page', currentPage);
@@ -527,14 +812,12 @@ async function fetchAndRenderBooks(isWishlist) {
     console.time('Chargement livres');
     
     try {
-        // ✅ Utiliser le cache pour améliorer les performances
         const response = await callApi(`${endpoint}?${queryString.toString()}`, 'GET', null, true, true);
         let books = isWishlist ? response.wishlist_books : response.books;
         const stats = response.stats;
 
         console.timeEnd('Chargement livres');
         
-        // ✅ Calculer la pagination
         totalItems = stats.total || 0;
         totalPages = itemsPerPage >= 1000 ? 1 : Math.ceil(totalItems / itemsPerPage);
         
@@ -545,8 +828,8 @@ async function fetchAndRenderBooks(isWishlist) {
             html += `
                 <div class="stats-bar">
                     <span><strong>${stats.total}</strong> livres</span>
-                    <span>📚 J: <strong>${stats.mes_livres}</strong></span>
-                    <span>📚 K: <strong>${stats.livres_k}</strong></span>
+                    <span>📚 Jérémy: <strong>${stats.mes_livres}</strong></span>
+                    <span>📚 Kelly: <strong>${stats.livres_k}</strong></span>
                     <span>📖 À lire: <strong>${stats.a_lire}</strong></span>
                     <span>📚 En cours: <strong>${stats.en_cours}</strong></span>
                     <span>✅ Lus: <strong>${stats.lus}</strong></span>
@@ -557,8 +840,8 @@ async function fetchAndRenderBooks(isWishlist) {
             html += `
                 <div class="stats-bar">
                     <span><strong>${stats.total}</strong> souhaits</span>
-                    <span>💖 J: <strong>${stats.mes_souhaits}</strong></span>
-                    <span>💖 K: <strong>${stats.souhaits_k}</strong></span>
+                    <span>💖 Jérémy: <strong>${stats.mes_souhaits}</strong></span>
+                    <span>💖 Kelly: <strong>${stats.souhaits_k}</strong></span>
                 </div>
             `;
         }
@@ -588,6 +871,7 @@ async function fetchAndRenderBooks(isWishlist) {
                                 </th>
                                 ${!isWishlist ? `<th class="sortable ${currentSortColumn === 'note' ? currentSortDirection : ''}" data-sort="note">Note <span class="sort-icon">${getSortIcon('note')}</span></th>` : ''}
                                 ${!isWishlist ? `<th class="sortable ${currentSortColumn === 'statut_lecture' ? currentSortDirection : ''}" data-sort="statut_lecture">Statut <span class="sort-icon">${getSortIcon('statut_lecture')}</span></th>` : ''}
+                                ${!isWishlist ? '<th>Tags</th>' : ''}
                                 <th class="actions-cell">Actions</th>
                             </tr>
                         </thead>
@@ -596,6 +880,8 @@ async function fetchAndRenderBooks(isWishlist) {
             
             books.forEach(book => {
                 const noteStars = !isWishlist && book.note ? '⭐'.repeat(book.note) : '';
+                const tags = book.tags || [];
+                
                 html += `
                     <tr>
                         <td class="book-title">${escapeHtml(book.titre)}</td>
@@ -603,15 +889,20 @@ async function fetchAndRenderBooks(isWishlist) {
                         <td><span class="badge">${book.proprietaire}</span></td>
                         ${!isWishlist ? `<td>${noteStars} ${book.note || 0}/5</td>` : ''}
                         ${!isWishlist ? `<td><span class="status-badge status-${book.statut_lecture}">${formatStatut(book.statut_lecture)}</span></td>` : ''}
+                        ${!isWishlist ? `<td class="tags-cell">${tags.map(tag => `<span class="tag-mini">${escapeHtml(tag.name)}</span>`).join(' ')}</td>` : ''}
                         <td class="actions-cell">
-                            <button class="btn-edit" onclick="showPage('addBook', { bookId: ${book.id}, isWishlist: ${isWishlist} })" title="Modifier">
+                            <button class="btn-edit" onclick="editBookInModal(${book.id}, ${isWishlist})" title="Modifier">
                                 <i class="fas fa-edit"></i>
                             </button>
                             ${isWishlist ? `
                             <button class="btn-move" onclick="moveToCollection(${book.id})" title="Vers la collection">
                                 <i class="fas fa-arrow-right"></i>
                             </button>` : ''}
-                            <button class="btn-delete" onclick="deleteBook(${book.id}, ${isWishlist})" title="Supprimer">
+                            ${!isWishlist ? `
+                            <button class="btn-loan" onclick="createLoanForBook(${book.id}, '${escapeHtml(book.titre)}')" title="Prêter">
+                                <i class="fas fa-handshake"></i>
+                            </button>` : ''}
+                            <button class="btn-delete" onclick="deleteBookWithConfirm(${book.id}, ${isWishlist}, '${escapeHtml(book.titre)}')" title="Supprimer">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </td>
@@ -629,7 +920,6 @@ async function fetchAndRenderBooks(isWishlist) {
         bookListContent.innerHTML = html;
         renderPaginationControls(isWishlist);
 
-        // ✅ Événements de tri
         document.querySelectorAll('.book-table th.sortable').forEach(header => {
             header.addEventListener('click', () => {
                 const column = header.dataset.sort;
@@ -658,7 +948,6 @@ async function fetchAndRenderBooks(isWishlist) {
     }
 }
 
-// ✅ Formater le statut
 function formatStatut(statut) {
     const statuts = {
         'a_lire': 'À lire',
@@ -668,14 +957,13 @@ function formatStatut(statut) {
     return statuts[statut] || statut;
 }
 
-// ✅ Icône de tri
 function getSortIcon(column) {
     if (currentSortColumn !== column) return '⇅';
     return currentSortDirection === 'asc' ? '↑' : '↓';
 }
 
-// ✅ Échapper le HTML pour éviter les XSS
 function escapeHtml(text) {
+    if (!text) return '';
     const map = {
         '&': '&amp;',
         '<': '&lt;',
@@ -683,10 +971,9 @@ function escapeHtml(text) {
         '"': '&quot;',
         "'": '&#039;'
     };
-    return text.replace(/[&<>"']/g, m => map[m]);
+    return text.toString().replace(/[&<>"']/g, m => map[m]);
 }
 
-// ✅ Afficher les informations de pagination
 function renderPaginationInfo(currentPageItems) {
     const paginationInfo = document.getElementById('paginationInfo');
     if (!paginationInfo) return;
@@ -708,7 +995,6 @@ function renderPaginationInfo(currentPageItems) {
     `;
 }
 
-// ✅ Afficher les contrôles de pagination
 function renderPaginationControls(isWishlist) {
     const paginationControls = document.getElementById('paginationControls');
     if (!paginationControls) return;
@@ -762,7 +1048,6 @@ function renderPaginationControls(isWishlist) {
     paginationControls.innerHTML = html;
 }
 
-// ✅ Calculer les numéros de pages à afficher
 function getPageNumbers(current, total) {
     const delta = 2;
     const range = [];
@@ -790,7 +1075,6 @@ function getPageNumbers(current, total) {
     return rangeWithDots;
 }
 
-// ✅ Fonction pour changer de page
 function goToPage(pageNum, isWishlist) {
     if (pageNum < 1 || pageNum > totalPages || pageNum === currentPage) return;
     currentPage = pageNum;
@@ -798,7 +1082,6 @@ function goToPage(pageNum, isWishlist) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-// ✅ Aller à une page via l'input
 function goToPageInput(isWishlist) {
     const input = document.getElementById('gotoPage');
     const pageNum = parseInt(input.value);
@@ -806,212 +1089,700 @@ function goToPageInput(isWishlist) {
     if (pageNum >= 1 && pageNum <= totalPages) {
         goToPage(pageNum, isWishlist);
     } else {
-        showAlert(`Veuillez entrer un numéro entre 1 et ${totalPages}`, 'error', 2000);
+        showToast(`Veuillez entrer un numéro entre 1 et ${totalPages}`, 'error', 2000);
         input.value = currentPage;
     }
 }
 
-// --- Formulaire d'ajout/modification ---
-async function renderAddEditBookForm(data = {}) {
-    const bookId = data.bookId;
-    const isWishlistEdit = data.isWishlist || false;
-    let book = {};
-    let formTitle = '➕ Ajouter un Nouveau Livre';
-    let isEditing = false;
+// ====== GESTION DES LIVRES AVEC MODAL ======
+
+async function openAddBookModal(isWishlist = false) {
+    // Charger les catégories
+    await loadCategories();
     
-    if (bookId) {
-        isEditing = true;
-        showLoader('Chargement du livre...');
-        try {
-            book = await callApi(isWishlistEdit ? `/wishlist/${bookId}` : `/books/${bookId}`);
-            formTitle = `✏ Modifier : "${book.titre}"`;
-            hideLoader();
-        } catch (error) {
-            hideLoader();
-            showAlert(`Impossible de charger le livre: ${error.message}`, 'error');
-            return;
-        }
-    }
-
-    appContainer.innerHTML = `
-        <div class="book-form-container">
-            <h2>${formTitle}</h2>
-            <form id="bookForm">
-                <input type="hidden" id="bookId" value="${book.id || ''}">
-                <input type="hidden" id="isEditing" value="${isEditing}">
-                <input type="hidden" id="isWishlistEdit" value="${isWishlistEdit}">
-
-                <div class="form-group">
-                    <label for="titre">📖 Titre <span class="required">*</span></label>
-                    <input type="text" id="titre" name="titre" value="${escapeHtml(book.titre || '')}" required>
-                </div>
-
-                <div class="form-group">
-                    <label for="auteur">✍ Auteur <span class="required">*</span></label>
-                    <input type="text" id="auteur" name="auteur" value="${escapeHtml(book.auteur || '')}" required>
-                </div>
-
-                ${!isWishlistEdit ? `
-                <div class="form-group">
-                    <label for="note">⭐ Note (0-5)</label>
-                    <input type="number" id="note" name="note" min="0" max="5" value="${book.note || 0}">
-                </div>
-                ` : ''}
-
-                <div class="form-group">
-                    <label for="proprietaire">👤 Propriétaire</label>
-                    <select id="proprietaire" name="proprietaire">
-                        <option value="J" ${book.proprietaire === 'J' ? 'selected' : ''}>J</option>
-                        <option value="K" ${book.proprietaire === 'K' ? 'selected' : ''}>K</option>
-                    </select>
-                </div>
-
-                ${!isWishlistEdit ? `
-                <div class="form-group">
-                    <label for="statut_lecture">📚 Statut de lecture</label>
-                    <select id="statut_lecture" name="statut_lecture">
-                        <option value="lu" ${book.statut_lecture === 'lu' ? 'selected' : ''}>Lu</option>
-                        <option value="a_lire" ${book.statut_lecture === 'a_lire' ? 'selected' : ''}>À lire</option>
-                        <option value="en_cours" ${book.statut_lecture === 'en_cours' ? 'selected' : ''}>En cours</option>
-                    </select>
-                </div>
-                ` : ''}
-                
-                ${!isEditing ? `
-                <div class="form-group checkbox-group">
-                    <label>
-                        <input type="checkbox" id="est_wishlist" name="est_wishlist" ${book.est_wishlist ? 'checked' : ''}>
-                        💖 Ajouter à la wishlist
-                    </label>
-                </div>
-                ` : ''}
-
-                <div class="form-actions">
-                    <button type="submit" class="btn-primary">
-                        <i class="fas fa-save"></i> ${isEditing ? 'Modifier' : 'Ajouter'}
-                    </button>
-                    <button type="button" class="btn-secondary" onclick="showPage(${isWishlistEdit ? '\'wishlist\', {isWishlist: true}' : '\'collection\', {isWishlist: false}'})">
-                        <i class="fas fa-times"></i> Annuler
-                    </button>
-                </div>
-            </form>
-        </div>
-    `;
-
-    document.getElementById('bookForm').addEventListener('submit', handleAddEditBookSubmit);
+    // Réinitialiser le formulaire
+    document.getElementById('bookForm').reset();
+    document.getElementById('bookId').value = '';
+    document.getElementById('bookModalTitle').textContent = 'Ajouter un nouveau livre';
+    document.getElementById('bookNote').value = '0';
+    document.getElementById('selectedTags').innerHTML = '';
+    
+    // Mettre le statut par défaut
+    document.getElementById('bookStatut').value = isWishlist ? 'a_lire' : 'lu';
+    
+    openModal('bookModal');
 }
 
-async function handleAddEditBookSubmit(event) {
-    event.preventDefault();
-
-    const bookId = document.getElementById('bookId').value;
-    const isEditing = document.getElementById('isEditing').value === 'true';
-    const isWishlistEdit = document.getElementById('isWishlistEdit').value === 'true';
-
-    const formData = new FormData(event.target);
-    const bookData = {
-        titre: formData.get('titre').trim(),
-        auteur: formData.get('auteur').trim(),
-        proprietaire: formData.get('proprietaire')
-    };
-
-    if (!isWishlistEdit) {
-        bookData.note = parseInt(formData.get('note')) || 0;
-        bookData.statut_lecture = formData.get('statut_lecture');
-    }
-
-    let endpoint;
-    let method;
-    let successMessage;
-
-    if (isEditing) {
-        endpoint = isWishlistEdit ? `/wishlist/${bookId}` : `/books/${bookId}`;
-        method = 'PUT';
-        successMessage = '✅ Livre modifié avec succès !';
-    } else {
-        bookData.est_wishlist = formData.get('est_wishlist') === 'on' ? 1 : 0;
-        endpoint = bookData.est_wishlist ? '/wishlist' : '/books';
-        method = 'POST';
-        successMessage = '✅ Livre ajouté avec succès !';
-    }
-
-    showLoader(isEditing ? 'Modification en cours...' : 'Ajout en cours...');
-
+async function editBookInModal(bookId, isWishlist = false) {
+    showLoader('Chargement du livre...');
+    
     try {
-        await callApi(endpoint, method, bookData);
-        clearCache();
-        hideLoader();
-        showAlert(successMessage, 'success');
+        // Charger les catégories
+        await loadCategories();
         
-        setTimeout(() => {
-            if (isWishlistEdit || bookData.est_wishlist) {
-                showPage('wishlist', { isWishlist: true });
-            } else {
-                showPage('collection', { isWishlist: false });
-            }
-        }, 300);
+        const book = await callApi(isWishlist ? `/wishlist/${bookId}` : `/books/${bookId}`);
+        
+        document.getElementById('bookModalTitle').textContent = `Modifier : "${book.titre}"`;
+        document.getElementById('bookId').value = book.id;
+        document.getElementById('bookTitre').value = book.titre;
+        document.getElementById('bookAuteur').value = book.auteur;
+        document.getElementById('bookNote').value = book.note || 0;
+        document.getElementById('bookProprietaire').value = book.proprietaire;
+        document.getElementById('bookStatut').value = book.statut_lecture || 'lu';
+        document.getElementById('bookCategory').value = book.category_id || '';
+        
+        // Mettre à jour l'affichage des étoiles
+        updateStarDisplay(book.note || 0);
+        
+        // Charger les tags
+        const selectedTagsContainer = document.getElementById('selectedTags');
+        selectedTagsContainer.innerHTML = '';
+        if (book.tags && book.tags.length > 0) {
+            book.tags.forEach(tag => {
+                addTagToForm(tag.name);
+            });
+        }
+        
+        hideLoader();
+        openModal('bookModal');
     } catch (error) {
         hideLoader();
-        // Erreur déjà gérée
+        showToast(`Erreur lors du chargement du livre: ${error.message}`, 'error');
     }
 }
 
-async function deleteBook(bookId, isWishlist) {
-    if (!confirm('⚠ Êtes-vous sûr de vouloir supprimer ce livre ?')) {
+async function loadCategories() {
+    try {
+        const response = await callApi('/categories', 'GET', null, true, true);
+        allCategories = response.categories || [];
+        
+        const categorySelect = document.getElementById('bookCategory');
+        if (categorySelect) {
+            categorySelect.innerHTML = '<option value="">Aucune</option>';
+            allCategories.forEach(cat => {
+                const option = document.createElement('option');
+                option.value = cat.id;
+                option.textContent = cat.name;
+                categorySelect.appendChild(option);
+            });
+        }
+    } catch (error) {
+        console.error('Erreur chargement catégories:', error);
+    }
+}
+
+function addTagToForm(tagName) {
+    const selectedTags = document.getElementById('selectedTags');
+    
+    // Vérifier si le tag existe déjà
+    const existingTags = Array.from(selectedTags.querySelectorAll('.tag-item')).map(tag => tag.dataset.tagName);
+    if (existingTags.includes(tagName)) {
+        showToast('Ce tag est déjà ajouté', 'info', 1500);
         return;
     }
+    
+    const tagElement = document.createElement('span');
+    tagElement.className = 'tag-item';
+    tagElement.dataset.tagName = tagName;
+    tagElement.innerHTML = `
+        ${escapeHtml(tagName)}
+        <button type="button" class="remove-tag" onclick="event.preventDefault(); this.parentElement.remove();">×</button>
+    `;
+    
+    selectedTags.appendChild(tagElement);
+}
 
-    showLoader('Suppression en cours...');
-
-    try {
-        const endpoint = isWishlist ? `/wishlist/${bookId}` : `/books/${bookId}`;
-        const response = await callApi(endpoint, 'DELETE');
-        clearCache();
-        hideLoader();
-        showAlert(response.message, 'success');
-        
-        setTimeout(() => {
-            if (isWishlist) {
-                showPage('wishlist', { isWishlist: true });
-            } else {
-                showPage('collection', { isWishlist: false });
+// Gestionnaire du formulaire de livre
+document.addEventListener('DOMContentLoaded', () => {
+    const bookForm = document.getElementById('bookForm');
+    if (bookForm) {
+        bookForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const bookId = document.getElementById('bookId').value;
+            const isEditing = !!bookId;
+            
+            const bookData = {
+                titre: document.getElementById('bookTitre').value.trim(),
+                auteur: document.getElementById('bookAuteur').value.trim(),
+                proprietaire: document.getElementById('bookProprietaire').value,
+                note: parseInt(document.getElementById('bookNote').value) || 0,
+                statut_lecture: document.getElementById('bookStatut').value,
+                category_id: parseInt(document.getElementById('bookCategory').value) || null
+            };
+            
+            // Récupérer les tags
+            const tagElements = document.querySelectorAll('#selectedTags .tag-item');
+            bookData.tags = Array.from(tagElements).map(tag => tag.dataset.tagName);
+            
+            showLoader(isEditing ? 'Modification en cours...' : 'Ajout en cours...');
+            
+            try {
+                if (isEditing) {
+                    await callApi(`/books/${bookId}`, 'PUT', bookData);
+                    showToast('✅ Livre modifié avec succès !', 'success');
+                } else {
+                    await callApi('/books', 'POST', bookData);
+                    showToast('✅ Livre ajouté avec succès !', 'success');
+                }
+                
+                clearCache();
+                closeBookModal();
+                hideLoader();
+                
+                // Rafraîchir la page actuelle
+                setTimeout(() => {
+                    showPage('collection', { isWishlist: false });
+                }, 300);
+            } catch (error) {
+                hideLoader();
             }
-        }, 300);
-    } catch (error) {
-        hideLoader();
-        // Erreur déjà gérée
+        });
     }
+    
+    // Gestion des tags dans le formulaire
+    const newTagInput = document.getElementById('bookTags');
+    if (newTagInput) {
+        newTagInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const tagName = e.target.value.trim().toLowerCase();
+                if (tagName) {
+                    addTagToForm(tagName);
+                    e.target.value = '';
+                }
+            }
+        });
+    }
+});
+
+async function deleteBookWithConfirm(bookId, isWishlist, titre) {
+    showConfirmDialog(
+        '⚠ Confirmer la suppression',
+        `Êtes-vous sûr de vouloir supprimer "${titre}" ?`,
+        async () => {
+            showLoader('Suppression en cours...');
+            
+            try {
+                const endpoint = isWishlist ? `/wishlist/${bookId}` : `/books/${bookId}`;
+                const response = await callApi(endpoint, 'DELETE');
+                clearCache();
+                hideLoader();
+                showToast(response.message, 'success');
+                
+                setTimeout(() => {
+                    if (isWishlist) {
+                        showPage('wishlist', { isWishlist: true });
+                    } else {
+                        showPage('collection', { isWishlist: false });
+                    }
+                }, 300);
+            } catch (error) {
+                hideLoader();
+            }
+        }
+    );
 }
 
 async function moveToCollection(bookId) {
-    if (!confirm('📚 Déplacer ce livre vers votre collection ?')) {
+    showConfirmDialog(
+        '📚 Déplacer vers la collection',
+        'Voulez-vous déplacer ce livre vers votre collection ?',
+        async () => {
+            showLoader('Déplacement en cours...');
+            
+            try {
+                const response = await callApi(`/wishlist/${bookId}/move_to_collection`, 'POST');
+                clearCache();
+                hideLoader();
+                showToast(response.message, 'success');
+                
+                setTimeout(() => {
+                    showPage('wishlist', { isWishlist: true });
+                }, 300);
+            } catch (error) {
+                hideLoader();
+            }
+        }
+    );
+}
+
+// ====== PAGE DES TAGS ======
+
+async function renderTagsPage() {
+    appContainer.innerHTML = `
+        <h2>🏷 Gestion des Tags</h2>
+        
+        <div class="tags-manager">
+            <div class="add-tag-section">
+                <h3>Ajouter un nouveau tag</h3>
+                <div style="display: flex; gap: 10px;">
+                    <input type="text" id="newTagName" placeholder="Nom du tag" style="flex: 1;">
+                    <button onclick="createNewTag()"><i class="fas fa-plus"></i> Ajouter</button>
+                </div>
+            </div>
+            
+            <div id="tagsListContent">
+                <div class="spinner"></div>
+                <p>Chargement des tags...</p>
+            </div>
+        </div>
+    `;
+    
+    loadTagsList();
+}
+
+async function loadTagsList() {
+    try {
+        const response = await callApi('/tags', 'GET', null, true, false);
+        const tags = response.tags || [];
+        
+        const tagsListContent = document.getElementById('tagsListContent');
+        
+        if (tags.length === 0) {
+            tagsListContent.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-tags fa-3x"></i>
+                    <p>Aucun tag disponible</p>
+                </div>
+            `;
+        } else {
+            tagsListContent.innerHTML = `
+                <div class="tags-grid">
+                    ${tags.map(tag => `
+                        <div class="tag-card">
+                            <span class="tag-name">${escapeHtml(tag.name)}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+    } catch (error) {
+        document.getElementById('tagsListContent').innerHTML = `
+            <div class="error-message">
+                <p>Erreur lors du chargement des tags</p>
+                <button onclick="loadTagsList()">Réessayer</button>
+            </div>
+        `;
+    }
+}
+
+async function createNewTag() {
+    const input = document.getElementById('newTagName');
+    const tagName = input.value.trim().toLowerCase();
+    
+    if (!tagName) {
+        showToast('Veuillez entrer un nom de tag', 'error');
         return;
     }
     
-    showLoader('Déplacement en cours...');
-    
     try {
-        const response = await callApi(`/wishlist/${bookId}/move_to_collection`, 'POST');
-        clearCache();
-        hideLoader();
-        showAlert(response.message, 'success');
-        
-        setTimeout(() => {
-            showPage('wishlist', { isWishlist: true });
-        }, 300);
+        await callApi('/tags', 'POST', { name: tagName });
+        showToast('Tag créé avec succès !', 'success');
+        input.value = '';
+        loadTagsList();
     } catch (error) {
-        hideLoader();
         // Erreur déjà gérée
     }
 }
 
-// --- Initialisation ---
+// ====== PAGE DES PRÊTS ======
+
+async function renderLoansPage() {
+    appContainer.innerHTML = `
+        <h2>📖 Gestion des Prêts</h2>
+        
+        <div class="loans-filters">
+            <select id="loanStatusFilter">
+                <option value="">Tous les statuts</option>
+                <option value="active">En cours</option>
+                <option value="overdue">En retard</option>
+                <option value="returned">Retournés</option>
+            </select>
+            <button onclick="loadLoans()"><i class="fas fa-filter"></i> Filtrer</button>
+            <button onclick="loadLoans(true)" class="secondary-btn"><i class="fas fa-sync-alt"></i> Actualiser</button>
+        </div>
+        
+        <div id="loansContent">
+            <div class="spinner"></div>
+            <p>Chargement des prêts...</p>
+        </div>
+    `;
+    
+    loadLoans();
+}
+
+async function loadLoans(forceRefresh = false) {
+    const loansContent = document.getElementById('loansContent');
+    loansContent.innerHTML = '<div class="spinner"></div><p>Chargement...</p>';
+    
+    const statusFilter = document.getElementById('loanStatusFilter')?.value || '';
+    let endpoint = '/loans';
+    if (statusFilter) {
+        endpoint += `?status=${statusFilter}`;
+    }
+    
+    try {
+        const response = await callApi(endpoint, 'GET', null, true, !forceRefresh);
+        const loans = response.loans || [];
+        
+        if (loans.length === 0) {
+            loansContent.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-handshake fa-3x"></i>
+                    <p>Aucun prêt ${statusFilter ? 'avec ce statut' : 'enregistré'}</p>
+                </div>
+            `;
+        } else {
+            let html = '<div class="loans-list">';
+            
+            loans.forEach(loan => {
+                const isOverdue = loan.status === 'overdue';
+                const isActive = loan.status === 'active';
+                const statusClass = loan.status;
+                const statusText = loan.status === 'active' ? 'En cours' : 
+                                 loan.status === 'overdue' ? 'En retard' : 'Retourné';
+                
+                html += `
+                    <div class="loan-card ${statusClass}">
+                        <div class="loan-header">
+                            <h3>${escapeHtml(loan.titre)}</h3>
+                            <span class="loan-status-badge ${statusClass}">${statusText}</span>
+                        </div>
+                        <div class="loan-details">
+                            <p><strong>Auteur:</strong> ${escapeHtml(loan.auteur)}</p>
+                            <p><strong>Emprunté par:</strong> ${escapeHtml(loan.user_name)}</p>
+                            <p><strong>Date d'emprunt:</strong> ${new Date(loan.loan_date).toLocaleDateString('fr-FR')}</p>
+                            <p><strong>Date de retour prévue:</strong> ${new Date(loan.due_date).toLocaleDateString('fr-FR')}</p>
+                            ${loan.return_date ? `<p><strong>Retourné le:</strong> ${new Date(loan.return_date).toLocaleDateString('fr-FR')}</p>` : ''}
+                        </div>
+                        ${(isActive || isOverdue) ? `
+                        <div class="loan-actions">
+                            <button onclick="returnLoanWithConfirm(${loan.id}, '${escapeHtml(loan.titre)}')" class="btn-success">
+                                <i class="fas fa-check"></i> Marquer comme retourné
+                            </button>
+                            ${isActive ? `
+                            <button onclick="extendLoan(${loan.id})" class="btn-info">
+                                <i class="fas fa-clock"></i> Prolonger (7 jours)
+                            </button>
+                            ` : ''}
+                        </div>
+                        ` : ''}
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            loansContent.innerHTML = html;
+        }
+    } catch (error) {
+        loansContent.innerHTML = `
+            <div class="error-message">
+                <p>Erreur lors du chargement des prêts</p>
+                <button onclick="loadLoans()">Réessayer</button>
+            </div>
+        `;
+    }
+}
+
+async function createLoanForBook(bookId, titre) {
+    document.getElementById('loanModalTitle').textContent = `Prêter : "${titre}"`;
+    document.getElementById('loanBookId').value = bookId;
+    document.getElementById('loanDuration').value = 14;
+    
+    // Charger les utilisateurs
+    try {
+        const response = await callApi('/users', 'GET', null, true, true);
+        const users = response.users || [];
+        
+        const userSelect = document.getElementById('loanUser');
+        userSelect.innerHTML = '<option value="">Sélectionner un utilisateur</option>';
+        users.forEach(user => {
+            const option = document.createElement('option');
+            option.value = user.id;
+            option.textContent = user.name;
+            userSelect.appendChild(option);
+        });
+        
+        updateCalculatedDueDate();
+        openModal('loanModal');
+    } catch (error) {
+        showToast('Erreur lors du chargement des utilisateurs', 'error');
+    }
+}
+
+// Gestionnaire du formulaire de prêt
+document.addEventListener('DOMContentLoaded', () => {
+    const loanForm = document.getElementById('loanForm');
+    if (loanForm) {
+        loanForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const bookId = document.getElementById('loanBookId').value;
+            const userId = document.getElementById('loanUser').value;
+            const duration = document.getElementById('loanDuration').value;
+            
+            if (!userId) {
+                showToast('Veuillez sélectionner un utilisateur', 'error');
+                return;
+            }
+            
+            showLoader('Création du prêt...');
+            
+            try {
+                await callApi('/loans', 'POST', {
+                    book_id: parseInt(bookId),
+                    user_id: parseInt(userId),
+                    loan_duration: parseInt(duration)
+                });
+                
+                clearCache();
+                hideLoader();
+                closeLoanModal();
+                showToast('Prêt créé avec succès !', 'success');
+                checkOverdueLoans(); // Mettre à jour les notifications
+            } catch (error) {
+                hideLoader();
+            }
+        });
+    }
+});
+
+function showAddUserForm() {
+    closeLoanModal();
+    document.getElementById('userName').value = '';
+    document.getElementById('userEmail').value = '';
+    openModal('userModal');
+}
+
+// Gestionnaire du formulaire utilisateur
+document.addEventListener('DOMContentLoaded', () => {
+    const userForm = document.getElementById('userForm');
+    if (userForm) {
+        userForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const name = document.getElementById('userName').value.trim();
+            const email = document.getElementById('userEmail').value.trim();
+            
+            if (!name) {
+                showToast('Veuillez entrer un nom', 'error');
+                return;
+            }
+            
+            try {
+                await callApi('/users', 'POST', { name, email: email || null });
+                showToast('Utilisateur créé avec succès !', 'success');
+                closeUserModal();
+                
+                // Recharger la modal de prêt si elle était ouverte
+                const loanBookId = document.getElementById('loanBookId').value;
+                if (loanBookId) {
+                    const titre = document.getElementById('loanModalTitle').textContent.replace('Prêter : "', '').replace('"', '');
+                    createLoanForBook(loanBookId, titre);
+                }
+            } catch (error) {
+                // Erreur déjà gérée
+            }
+        });
+    }
+});
+
+async function returnLoanWithConfirm(loanId, titre) {
+    showConfirmDialog(
+        '📚 Retour de livre',
+        `Marquer "${titre}" comme retourné ?`,
+        async () => {
+            try {
+                showLoader('Mise à jour...');
+                await callApi(`/loans/${loanId}/return`, 'PATCH');
+                hideLoader();
+                showToast('Livre retourné !', 'success');
+                loadLoans();
+                checkOverdueLoans();
+            } catch (error) {
+                hideLoader();
+            }
+        }
+    );
+}
+
+async function extendLoan(loanId) {
+    try {
+        showLoader('Prolongation...');
+        const response = await callApi(`/loans/${loanId}/extend`, 'PATCH', { additional_days: 7 });
+        hideLoader();
+        showToast('Prêt prolongé de 7 jours !', 'success');
+        loadLoans();
+    } catch (error) {
+        hideLoader();
+    }
+}
+
+// ====== PAGE DES RECOMMANDATIONS ======
+
+async function renderRecommendationsPage() {
+    appContainer.innerHTML = `
+        <h2>🎯 Recommandations pour vous</h2>
+        <p class="subtitle">Basées sur vos lectures et vos goûts</p>
+        
+        <div id="recommendationsContent">
+            <div class="spinner"></div>
+            <p>Analyse de vos préférences...</p>
+        </div>
+    `;
+    
+    loadRecommendations();
+}
+
+async function loadRecommendations() {
+    const recommendationsContent = document.getElementById('recommendationsContent');
+    
+    try {
+        const response = await callApi(`/recommendations/${currentUserId}?limit=10`, 'GET', null, true, true);
+        const recommendations = response.recommendations || [];
+        
+        if (recommendations.length === 0) {
+            recommendationsContent.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-magic fa-3x"></i>
+                    <p>Pas encore assez de données pour générer des recommandations</p>
+                    <small>Empruntez et notez des livres pour obtenir des suggestions personnalisées !</small>
+                </div>
+            `;
+        } else {
+            let html = '<div class="recommendations-grid">';
+            
+            recommendations.forEach(book => {
+                html += `
+                    <div class="recommendation-card">
+                        <div class="recommendation-header">
+                            <h3>${escapeHtml(book.titre)}</h3>
+                            ${book.avg_rating ? `<span class="rating">⭐ ${book.avg_rating.toFixed(1)}</span>` : ''}
+                        </div>
+                        <p class="book-author">${escapeHtml(book.auteur)}</p>
+                        <p class="book-owner">Propriétaire: ${book.proprietaire}</p>
+                        ${book.matching_tags ? `<p class="matching-info">🏷 ${book.matching_tags} tags en commun</p>` : ''}
+                        <div class="recommendation-actions">
+                            <button onclick="editBookInModal(${book.id}, false)">
+                                <i class="fas fa-info-circle"></i> Voir détails
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            recommendationsContent.innerHTML = html;
+        }
+    } catch (error) {
+        recommendationsContent.innerHTML = `
+            <div class="error-message">
+                <p>Erreur lors du chargement des recommandations</p>
+                <button onclick="loadRecommendations()">Réessayer</button>
+            </div>
+        `;
+    }
+}
+
+// ====== PAGE DES UTILISATEURS ======
+
+async function renderUsersPage() {
+    appContainer.innerHTML = `
+        <h2>👥 Gestion des Utilisateurs</h2>
+        
+        <div class="users-manager">
+            <div class="add-user-section">
+                <h3>Ajouter un utilisateur</h3>
+                <div style="display: flex; gap: 10px;">
+                    <input type="text" id="newUserNamePage" placeholder="Nom" style="flex: 1;">
+                    <input type="email" id="newUserEmailPage" placeholder="Email (optionnel)" style="flex: 1;">
+                    <button onclick="createNewUserFromPage()"><i class="fas fa-plus"></i> Ajouter</button>
+                </div>
+            </div>
+            
+            <div id="usersListContent">
+                <div class="spinner"></div>
+                <p>Chargement des utilisateurs...</p>
+            </div>
+        </div>
+    `;
+    
+    loadUsersList();
+}
+
+async function loadUsersList() {
+    try {
+        const response = await callApi('/users', 'GET', null, true, false);
+        const users = response.users || [];
+        
+        const usersListContent = document.getElementById('usersListContent');
+        
+        if (users.length === 0) {
+            usersListContent.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-users fa-3x"></i>
+                    <p>Aucun utilisateur enregistré</p>
+                </div>
+            `;
+        } else {
+            usersListContent.innerHTML = `
+                <div class="users-list">
+                    ${users.map(user => `
+                        <div class="user-card">
+                            <div class="user-info">
+                                <h3>${escapeHtml(user.name)}</h3>
+                                ${user.email ? `<p>${escapeHtml(user.email)}</p>` : ''}
+                                <small>Membre depuis: ${new Date(user.created_at).toLocaleDateString('fr-FR')}</small>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+    } catch (error) {
+        document.getElementById('usersListContent').innerHTML = `
+            <div class="error-message">
+                <p>Erreur lors du chargement des utilisateurs</p>
+                <button onclick="loadUsersList()">Réessayer</button>
+            </div>
+        `;
+    }
+}
+
+async function createNewUserFromPage() {
+    const nameInput = document.getElementById('newUserNamePage');
+    const emailInput = document.getElementById('newUserEmailPage');
+    
+    const name = nameInput.value.trim();
+    const email = emailInput.value.trim();
+    
+    if (!name) {
+        showToast('Veuillez entrer un nom', 'error');
+        return;
+    }
+    
+    try {
+        await callApi('/users', 'POST', { name, email: email || null });
+        showToast('Utilisateur créé avec succès !', 'success');
+        nameInput.value = '';
+        emailInput.value = '';
+        loadUsersList();
+    } catch (error) {
+        // Erreur déjà gérée
+    }
+}
+
+// ====== INITIALISATION ======
+
 document.addEventListener('DOMContentLoaded', () => {
     console.time('⏱ Initialisation totale');
     
-    // ✅ Afficher l'URL de l'API utilisée (pour debug)
     console.log('🔗 API URL:', API_BASE_URL);
     console.log('⏱ Cache duration:', CACHE_DURATION, 'ms');
+    
+    // Initialiser le mode sombre
+    initDarkMode();
     
     if (currentApiKey) {
         renderNavigation();

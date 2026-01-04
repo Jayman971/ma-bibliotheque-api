@@ -1,4 +1,4 @@
-# api_biblio.py - Version OPTIMISÉE pour déploiement sur Render.com avec PostgreSQL
+# api_biblio.py - Version COMPLÈTE avec Tags, Prêts, Recommandations et Transformation J/K
 
 from flask import Flask, request, jsonify
 from functools import wraps
@@ -7,6 +7,8 @@ from psycopg.rows import dict_row
 import os
 from flask_cors import CORS
 from datetime import datetime, timedelta
+from collections import Counter
+import re
 
 app = Flask(__name__)
 
@@ -32,10 +34,52 @@ USERS_PASSWORDS = {
     'admin': os.getenv('RENDER_ADMIN_PASSWORD', 'VotreMotDePasse123!'),
 }
 
-# ✅ Cache simple en mémoire (pour Render gratuit)
-# Pour une vraie production, utilisez Redis
+# ✅ Cache simple en mémoire
 cache_store = {}
 CACHE_DURATION = 30  # secondes
+
+# ====== UTILITAIRE DE TRANSFORMATION J/K ======
+
+def transform_jk_in_text(text):
+    """
+    Transforme les lettres J et K isolées en Jérémy et Kelly
+    """
+    if not isinstance(text, str):
+        return text
+    
+    # Transformer J en Jérémy et K en Kelly (lettres isolées uniquement)
+    text = re.sub(r'\bJ\b', 'Jérémy', text)
+    text = re.sub(r'\bK\b', 'Kelly', text)
+    return text
+
+def transform_jk_in_dict(data):
+    """
+    Transforme récursivement J et K dans un dictionnaire ou une liste
+    """
+    if isinstance(data, dict):
+        return {key: transform_jk_in_dict(value) for key, value in data.items()}
+    elif isinstance(data, list):
+        return [transform_jk_in_dict(item) for item in data]
+    elif isinstance(data, str):
+        return transform_jk_in_text(data)
+    else:
+        return data
+
+def jsonify_with_transform(*args, **kwargs):
+    """
+    Version personnalisée de jsonify qui transforme J et K
+    """
+    if args:
+        data = args[0]
+    elif kwargs:
+        data = kwargs
+    else:
+        data = {}
+    
+    transformed_data = transform_jk_in_dict(data)
+    return jsonify(transformed_data)
+
+# ====== CACHE UTILITIES ======
 
 def get_from_cache(key):
     """Récupère une valeur du cache si elle n'est pas expirée"""
@@ -44,7 +88,7 @@ def get_from_cache(key):
         if datetime.now() - timestamp < timedelta(seconds=CACHE_DURATION):
             return data
         else:
-            del cache_store[key]  # Nettoie le cache expiré
+            del cache_store[key]
     return None
 
 def set_in_cache(key, value):
@@ -62,17 +106,17 @@ def api_key_required(f):
     def decorated_function(*args, **kwargs):
         auth_header = request.headers.get('Authorization')
         if not auth_header:
-            return jsonify({'message': 'Authorization header is missing'}), 401
+            return jsonify_with_transform({'message': 'Authorization header is missing'}), 401
 
         try:
             scheme, api_key = auth_header.split(None, 1)
             if scheme.lower() != 'bearer':
-                return jsonify({'message': 'Invalid authorization scheme. Use Bearer.'}), 401
+                return jsonify_with_transform({'message': 'Invalid authorization scheme. Use Bearer.'}), 401
         except ValueError:
-            return jsonify({'message': 'Invalid Authorization header format. Expected "Bearer <api_key>"'}), 401
+            return jsonify_with_transform({'message': 'Invalid Authorization header format. Expected "Bearer <api_key>"'}), 401
 
         if api_key not in API_KEYS:
-            return jsonify({'message': 'Invalid API Key'}), 401
+            return jsonify_with_transform({'message': 'Invalid API Key'}), 401
         
         request.current_user_api_key = api_key
         return f(*args, **kwargs)
@@ -87,11 +131,11 @@ def api_login():
     if username in USERS_PASSWORDS and USERS_PASSWORDS[username] == password:
         returned_api_key = next((key for key, value in API_KEYS.items() if value == 'admin' and username == 'admin'), None)
         if returned_api_key:
-            return jsonify({'message': 'Login successful', 'api_key': returned_api_key}), 200
+            return jsonify_with_transform({'message': 'Login successful', 'api_key': returned_api_key}), 200
         else:
-            return jsonify({'message': 'No API Key found for this user/configuration'}), 500
+            return jsonify_with_transform({'message': 'No API Key found for this user/configuration'}), 500
     else:
-        return jsonify({'message': 'Invalid credentials'}), 401
+        return jsonify_with_transform({'message': 'Invalid credentials'}), 401
 
 # ====== BASE DE DONNÉES UTILITIES ======
 
@@ -100,11 +144,11 @@ def get_db_connection():
     conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
     return conn
 
-def create_table():
-    """Crée la table et les index si ils n'existent pas"""
+def create_tables():
+    """Crée toutes les tables nécessaires"""
     conn = get_db_connection()
     with conn.cursor() as cur:
-        # ✅ Création de la table avec SERIAL pour l'auto-increment (PostgreSQL)
+        # ✅ Table des livres
         cur.execute('''
             CREATE TABLE IF NOT EXISTS livres (
                 id SERIAL PRIMARY KEY,
@@ -113,26 +157,109 @@ def create_table():
                 note INTEGER CHECK(note >= 0 AND note <= 5),
                 proprietaire TEXT NOT NULL DEFAULT 'J',
                 statut_lecture TEXT DEFAULT 'lu',
-                est_wishlist INTEGER DEFAULT 0
+                est_wishlist INTEGER DEFAULT 0,
+                category_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
-        # ✅ Création d'index pour améliorer les performances
+        # ✅ Table des catégories
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS categories (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                parent_id INTEGER,
+                FOREIGN KEY (parent_id) REFERENCES categories(id) ON DELETE SET NULL
+            )
+        ''')
+        
+        # ✅ Table des tags
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS tags (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE
+            )
+        ''')
+        
+        # ✅ Table de liaison livres-tags
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS book_tags (
+                book_id INTEGER NOT NULL,
+                tag_id INTEGER NOT NULL,
+                PRIMARY KEY (book_id, tag_id),
+                FOREIGN KEY (book_id) REFERENCES livres(id) ON DELETE CASCADE,
+                FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+            )
+        ''')
+        
+        # ✅ Table des utilisateurs (pour les prêts)
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                email TEXT UNIQUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # ✅ Table des prêts
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS loans (
+                id SERIAL PRIMARY KEY,
+                book_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                loan_date DATE NOT NULL,
+                due_date DATE NOT NULL,
+                return_date DATE,
+                status TEXT DEFAULT 'active' CHECK(status IN ('active', 'returned', 'overdue')),
+                FOREIGN KEY (book_id) REFERENCES livres(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        ''')
+        
+        # ✅ Table des évaluations (pour les recommandations)
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS ratings (
+                id SERIAL PRIMARY KEY,
+                book_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                rating INTEGER CHECK(rating BETWEEN 1 AND 5),
+                review TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (book_id) REFERENCES livres(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                UNIQUE(book_id, user_id)
+            )
+        ''')
+        
+        # ✅ Table des préférences utilisateur (mode sombre, etc.)
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS user_preferences (
+                user_id INTEGER PRIMARY KEY,
+                dark_mode BOOLEAN DEFAULT FALSE,
+                language TEXT DEFAULT 'fr',
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        ''')
+        
+        # ✅ Index pour améliorer les performances
         cur.execute('CREATE INDEX IF NOT EXISTS idx_est_wishlist ON livres(est_wishlist)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_proprietaire ON livres(proprietaire)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_statut_lecture ON livres(statut_lecture)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_titre ON livres(titre)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_auteur ON livres(auteur)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_category_id ON livres(category_id)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_loan_status ON loans(status)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_loan_book_id ON loans(book_id)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_loan_user_id ON loans(user_id)')
         
         conn.commit()
     conn.close()
 
-create_table()
+create_tables()
 
 def get_book_by_id_helper(book_id, is_wishlist=None):
-    """
-    Récupère un livre spécifique par ID.
-    """
+    """Récupère un livre spécifique par ID avec ses tags"""
     conn = get_db_connection()
     with conn.cursor() as cur:
         query = 'SELECT * FROM livres WHERE id = %s'
@@ -142,27 +269,671 @@ def get_book_by_id_helper(book_id, is_wishlist=None):
             params.append(1 if is_wishlist else 0)
         cur.execute(query, params)
         book = cur.fetchone()
+        
+        if book:
+            # Récupérer les tags du livre
+            cur.execute('''
+                SELECT t.id, t.name
+                FROM tags t
+                JOIN book_tags bt ON t.id = bt.tag_id
+                WHERE bt.book_id = %s
+            ''', [book_id])
+            tags = cur.fetchall()
+            book['tags'] = tags
     conn.close()
     return book if book else None
 
-# ✅ Endpoint dédié aux statistiques (TRÈS RAPIDE)
+# ====== AUTOCOMPLETE SEARCH ======
+
+@app.route('/api/v1/search/autocomplete', methods=['GET'])
+@api_key_required
+def autocomplete_search():
+    """
+    Endpoint d'autocomplétion rapide
+    Retourne les 10 premiers résultats pour le titre et l'auteur
+    """
+    query = request.args.get('q', '').strip()
+    
+    if len(query) < 2:
+        return jsonify_with_transform({'suggestions': []}), 200
+    
+    # Cache
+    cache_key = f'autocomplete_{query}'
+    cached_data = get_from_cache(cache_key)
+    if cached_data:
+        return jsonify_with_transform(cached_data), 200
+    
+    conn = get_db_connection()
+    with conn.cursor() as cur:
+        cur.execute('''
+            SELECT id, titre, auteur, proprietaire, est_wishlist
+            FROM livres
+            WHERE titre ILIKE %s OR auteur ILIKE %s
+            ORDER BY titre ASC
+            LIMIT 10
+        ''', [f'%{query}%', f'%{query}%'])
+        results = cur.fetchall()
+    conn.close()
+    
+    response = {'suggestions': results}
+    set_in_cache(cache_key, response)
+    
+    return jsonify_with_transform(response), 200
+
+# ====== GESTION DES CATÉGORIES ======
+
+@app.route('/api/v1/categories', methods=['GET'])
+@api_key_required
+def get_categories():
+    """Récupère toutes les catégories avec hiérarchie"""
+    cache_key = 'all_categories'
+    cached_data = get_from_cache(cache_key)
+    if cached_data:
+        return jsonify_with_transform(cached_data), 200
+    
+    conn = get_db_connection()
+    with conn.cursor() as cur:
+        cur.execute('SELECT * FROM categories ORDER BY name ASC')
+        categories = cur.fetchall()
+    conn.close()
+    
+    result = {'categories': categories}
+    set_in_cache(cache_key, result)
+    
+    return jsonify_with_transform(result), 200
+
+@app.route('/api/v1/categories', methods=['POST'])
+@api_key_required
+def create_category():
+    """Créer une nouvelle catégorie"""
+    data = request.get_json()
+    name = data.get('name')
+    parent_id = data.get('parent_id')
+    
+    if not name:
+        return jsonify_with_transform({'message': 'Le nom de la catégorie est obligatoire'}), 400
+    
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                'INSERT INTO categories (name, parent_id) VALUES (%s, %s) RETURNING id',
+                (name, parent_id)
+            )
+            new_category_id = cur.fetchone()['id']
+            conn.commit()
+        conn.close()
+        clear_cache()
+        return jsonify_with_transform({'message': 'Catégorie créée avec succès', 'id': new_category_id}), 201
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify_with_transform({'message': f'Erreur: {str(e)}'}), 500
+
+@app.route('/api/v1/categories/<int:category_id>', methods=['DELETE'])
+@api_key_required
+def delete_category(category_id):
+    """Supprimer une catégorie"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute('DELETE FROM categories WHERE id = %s', (category_id,))
+            conn.commit()
+        conn.close()
+        clear_cache()
+        return jsonify_with_transform({'message': 'Catégorie supprimée avec succès'}), 200
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify_with_transform({'message': f'Erreur: {str(e)}'}), 500
+
+# ====== GESTION DES TAGS ======
+
+@app.route('/api/v1/tags', methods=['GET'])
+@api_key_required
+def get_tags():
+    """Récupère tous les tags"""
+    cache_key = 'all_tags'
+    cached_data = get_from_cache(cache_key)
+    if cached_data:
+        return jsonify_with_transform(cached_data), 200
+    
+    conn = get_db_connection()
+    with conn.cursor() as cur:
+        cur.execute('SELECT * FROM tags ORDER BY name ASC')
+        tags = cur.fetchall()
+    conn.close()
+    
+    result = {'tags': tags}
+    set_in_cache(cache_key, result)
+    
+    return jsonify_with_transform(result), 200
+
+@app.route('/api/v1/tags', methods=['POST'])
+@api_key_required
+def create_tag():
+    """Créer un nouveau tag"""
+    data = request.get_json()
+    name = data.get('name', '').strip().lower()
+    
+    if not name:
+        return jsonify_with_transform({'message': 'Le nom du tag est obligatoire'}), 400
+    
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            # Vérifier si le tag existe déjà
+            cur.execute('SELECT id FROM tags WHERE name = %s', (name,))
+            existing_tag = cur.fetchone()
+            
+            if existing_tag:
+                return jsonify_with_transform({'message': 'Tag déjà existant', 'id': existing_tag['id']}), 200
+            
+            cur.execute('INSERT INTO tags (name) VALUES (%s) RETURNING id', (name,))
+            new_tag_id = cur.fetchone()['id']
+            conn.commit()
+        conn.close()
+        clear_cache()
+        return jsonify_with_transform({'message': 'Tag créé avec succès', 'id': new_tag_id}), 201
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify_with_transform({'message': f'Erreur: {str(e)}'}), 500
+
+@app.route('/api/v1/books/<int:book_id>/tags', methods=['POST'])
+@api_key_required
+def add_tag_to_book(book_id):
+    """Ajouter un tag à un livre"""
+    data = request.get_json()
+    tag_name = data.get('tag', '').strip().lower()
+    
+    if not tag_name:
+        return jsonify_with_transform({'message': 'Le nom du tag est obligatoire'}), 400
+    
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            # Créer le tag s'il n'existe pas
+            cur.execute('SELECT id FROM tags WHERE name = %s', (tag_name,))
+            tag = cur.fetchone()
+            
+            if not tag:
+                cur.execute('INSERT INTO tags (name) VALUES (%s) RETURNING id', (tag_name,))
+                tag_id = cur.fetchone()['id']
+            else:
+                tag_id = tag['id']
+            
+            # Associer le tag au livre
+            cur.execute(
+                'INSERT INTO book_tags (book_id, tag_id) VALUES (%s, %s) ON CONFLICT DO NOTHING',
+                (book_id, tag_id)
+            )
+            conn.commit()
+        conn.close()
+        clear_cache()
+        return jsonify_with_transform({'message': 'Tag ajouté au livre avec succès'}), 200
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify_with_transform({'message': f'Erreur: {str(e)}'}), 500
+
+@app.route('/api/v1/books/<int:book_id>/tags/<int:tag_id>', methods=['DELETE'])
+@api_key_required
+def remove_tag_from_book(book_id, tag_id):
+    """Retirer un tag d'un livre"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute('DELETE FROM book_tags WHERE book_id = %s AND tag_id = %s', (book_id, tag_id))
+            conn.commit()
+        conn.close()
+        clear_cache()
+        return jsonify_with_transform({'message': 'Tag retiré du livre avec succès'}), 200
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify_with_transform({'message': f'Erreur: {str(e)}'}), 500
+
+# ====== GESTION DES UTILISATEURS ======
+
+@app.route('/api/v1/users', methods=['GET'])
+@api_key_required
+def get_users():
+    """Récupère tous les utilisateurs"""
+    conn = get_db_connection()
+    with conn.cursor() as cur:
+        cur.execute('SELECT id, name, email, created_at FROM users ORDER BY name ASC')
+        users = cur.fetchall()
+    conn.close()
+    return jsonify_with_transform({'users': users}), 200
+
+@app.route('/api/v1/users', methods=['POST'])
+@api_key_required
+def create_user():
+    """Créer un nouvel utilisateur"""
+    data = request.get_json()
+    name = data.get('name')
+    email = data.get('email')
+    
+    if not name:
+        return jsonify_with_transform({'message': 'Le nom est obligatoire'}), 400
+    
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                'INSERT INTO users (name, email) VALUES (%s, %s) RETURNING id',
+                (name, email)
+            )
+            new_user_id = cur.fetchone()['id']
+            conn.commit()
+        conn.close()
+        return jsonify_with_transform({'message': 'Utilisateur créé avec succès', 'id': new_user_id}), 201
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify_with_transform({'message': f'Erreur: {str(e)}'}), 500
+
+@app.route('/api/v1/users/<int:user_id>/preferences', methods=['GET'])
+@api_key_required
+def get_user_preferences(user_id):
+    """Récupère les préférences d'un utilisateur"""
+    conn = get_db_connection()
+    with conn.cursor() as cur:
+        cur.execute('SELECT * FROM user_preferences WHERE user_id = %s', (user_id,))
+        prefs = cur.fetchone()
+        
+        if not prefs:
+            # Créer des préférences par défaut
+            cur.execute(
+                'INSERT INTO user_preferences (user_id) VALUES (%s) RETURNING *',
+                (user_id,)
+            )
+            prefs = cur.fetchone()
+            conn.commit()
+    conn.close()
+    return jsonify_with_transform(prefs), 200
+
+@app.route('/api/v1/users/<int:user_id>/preferences', methods=['PUT'])
+@api_key_required
+def update_user_preferences(user_id):
+    """Met à jour les préférences d'un utilisateur"""
+    data = request.get_json()
+    dark_mode = data.get('dark_mode')
+    language = data.get('language')
+    
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            # Vérifier si les préférences existent
+            cur.execute('SELECT user_id FROM user_preferences WHERE user_id = %s', (user_id,))
+            exists = cur.fetchone()
+            
+            if exists:
+                updates = []
+                params = []
+                if dark_mode is not None:
+                    updates.append('dark_mode = %s')
+                    params.append(dark_mode)
+                if language:
+                    updates.append('language = %s')
+                    params.append(language)
+                
+                if updates:
+                    params.append(user_id)
+                    cur.execute(
+                        f'UPDATE user_preferences SET {", ".join(updates)} WHERE user_id = %s',
+                        params
+                    )
+            else:
+                cur.execute(
+                    'INSERT INTO user_preferences (user_id, dark_mode, language) VALUES (%s, %s, %s)',
+                    (user_id, dark_mode, language)
+                )
+            
+            conn.commit()
+        conn.close()
+        return jsonify_with_transform({'message': 'Préférences mises à jour avec succès'}), 200
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify_with_transform({'message': f'Erreur: {str(e)}'}), 500
+
+# ====== GESTION DES PRÊTS ======
+
+@app.route('/api/v1/loans', methods=['GET'])
+@api_key_required
+def get_loans():
+    """Récupère tous les prêts avec filtres optionnels"""
+    status_filter = request.args.get('status')  # active, returned, overdue
+    user_id = request.args.get('user_id')
+    
+    conn = get_db_connection()
+    with conn.cursor() as cur:
+        query = '''
+            SELECT l.*, u.name as user_name, b.titre, b.auteur
+            FROM loans l
+            JOIN users u ON l.user_id = u.id
+            JOIN livres b ON l.book_id = b.id
+            WHERE 1=1
+        '''
+        params = []
+        
+        if status_filter:
+            query += ' AND l.status = %s'
+            params.append(status_filter)
+        
+        if user_id:
+            query += ' AND l.user_id = %s'
+            params.append(user_id)
+        
+        query += ' ORDER BY l.loan_date DESC'
+        
+        cur.execute(query, params)
+        loans = cur.fetchall()
+        
+        # Vérifier les retards
+        for loan in loans:
+            if loan['status'] == 'active' and loan['due_date'] < datetime.now().date():
+                # Mettre à jour le statut en overdue
+                cur.execute(
+                    'UPDATE loans SET status = %s WHERE id = %s',
+                    ('overdue', loan['id'])
+                )
+                loan['status'] = 'overdue'
+        
+        conn.commit()
+    conn.close()
+    
+    return jsonify_with_transform({'loans': loans}), 200
+
+@app.route('/api/v1/loans', methods=['POST'])
+@api_key_required
+def create_loan():
+    """Créer un nouveau prêt"""
+    data = request.get_json()
+    book_id = data.get('book_id')
+    user_id = data.get('user_id')
+    loan_duration = data.get('loan_duration', 14)  # jours
+    
+    if not book_id or not user_id:
+        return jsonify_with_transform({'message': 'book_id et user_id sont obligatoires'}), 400
+    
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            # Vérifier si le livre n'est pas déjà emprunté
+            cur.execute(
+                'SELECT id FROM loans WHERE book_id = %s AND status = %s',
+                (book_id, 'active')
+            )
+            active_loan = cur.fetchone()
+            
+            if active_loan:
+                return jsonify_with_transform({'message': 'Ce livre est déjà emprunté'}), 400
+            
+            # Créer le prêt
+            loan_date = datetime.now().date()
+            due_date = loan_date + timedelta(days=loan_duration)
+            
+            cur.execute('''
+                INSERT INTO loans (book_id, user_id, loan_date, due_date, status)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id
+            ''', (book_id, user_id, loan_date, due_date, 'active'))
+            
+            new_loan_id = cur.fetchone()['id']
+            conn.commit()
+        conn.close()
+        clear_cache()
+        return jsonify_with_transform({
+            'message': 'Prêt créé avec succès',
+            'id': new_loan_id,
+            'due_date': due_date.isoformat()
+        }), 201
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify_with_transform({'message': f'Erreur: {str(e)}'}), 500
+
+@app.route('/api/v1/loans/<int:loan_id>/return', methods=['PATCH'])
+@api_key_required
+def return_loan(loan_id):
+    """Marquer un prêt comme retourné"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                'UPDATE loans SET return_date = %s, status = %s WHERE id = %s AND status IN (%s, %s)',
+                (datetime.now().date(), 'returned', loan_id, 'active', 'overdue')
+            )
+            if cur.rowcount == 0:
+                return jsonify_with_transform({'message': 'Prêt non trouvé ou déjà retourné'}), 404
+            conn.commit()
+        conn.close()
+        clear_cache()
+        return jsonify_with_transform({'message': 'Livre retourné avec succès'}), 200
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify_with_transform({'message': f'Erreur: {str(e)}'}), 500
+
+@app.route('/api/v1/loans/<int:loan_id>/extend', methods=['PATCH'])
+@api_key_required
+def extend_loan(loan_id):
+    """Prolonger un prêt"""
+    data = request.get_json()
+    additional_days = data.get('additional_days', 7)
+    
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute('SELECT due_date FROM loans WHERE id = %s AND status = %s', (loan_id, 'active'))
+            loan = cur.fetchone()
+            
+            if not loan:
+                return jsonify_with_transform({'message': 'Prêt non trouvé ou non actif'}), 404
+            
+            new_due_date = loan['due_date'] + timedelta(days=additional_days)
+            
+            cur.execute(
+                'UPDATE loans SET due_date = %s WHERE id = %s',
+                (new_due_date, loan_id)
+            )
+            conn.commit()
+        conn.close()
+        clear_cache()
+        return jsonify_with_transform({
+            'message': 'Prêt prolongé avec succès',
+            'new_due_date': new_due_date.isoformat()
+        }), 200
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify_with_transform({'message': f'Erreur: {str(e)}'}), 500
+
+@app.route('/api/v1/books/<int:book_id>/availability', methods=['GET'])
+@api_key_required
+def check_book_availability(book_id):
+    """Vérifier la disponibilité d'un livre"""
+    conn = get_db_connection()
+    with conn.cursor() as cur:
+        cur.execute('''
+            SELECT l.*, u.name as borrower_name
+            FROM loans l
+            JOIN users u ON l.user_id = u.id
+            WHERE l.book_id = %s AND l.status IN (%s, %s)
+            ORDER BY l.loan_date DESC
+            LIMIT 1
+        ''', (book_id, 'active', 'overdue'))
+        
+        active_loan = cur.fetchone()
+    conn.close()
+    
+    if active_loan:
+        return jsonify_with_transform({
+            'available': False,
+            'loan': active_loan
+        }), 200
+    else:
+        return jsonify_with_transform({
+            'available': True,
+            'loan': None
+        }), 200
+
+# ====== SYSTÈME DE RECOMMANDATION ======
+
+@app.route('/api/v1/recommendations/<int:user_id>', methods=['GET'])
+@api_key_required
+def get_recommendations(user_id):
+    """
+    Système de recommandation basé sur:
+    1. Les livres lus par l'utilisateur
+    2. Les notes qu'il a données
+    3. Les tags des livres qu'il a aimés
+    4. Filtrage collaboratif simple
+    """
+    limit = int(request.args.get('limit', 5))
+    
+    cache_key = f'recommendations_{user_id}_{limit}'
+    cached_data = get_from_cache(cache_key)
+    if cached_data:
+        return jsonify_with_transform(cached_data), 200
+    
+    conn = get_db_connection()
+    with conn.cursor() as cur:
+        # 1. Récupérer l'historique de l'utilisateur
+        cur.execute('''
+            SELECT l.book_id, b.titre, b.auteur, b.proprietaire, r.rating
+            FROM loans l
+            JOIN livres b ON l.book_id = b.id
+            LEFT JOIN ratings r ON r.book_id = l.book_id AND r.user_id = %s
+            WHERE l.user_id = %s AND l.status = 'returned'
+        ''', (user_id, user_id))
+        user_history = cur.fetchall()
+        
+        if not user_history:
+            # Pas d'historique, recommander les livres les mieux notés
+            cur.execute('''
+                SELECT l.id, l.titre, l.auteur, l.proprietaire, AVG(r.rating) as avg_rating
+                FROM livres l
+                LEFT JOIN ratings r ON l.id = r.book_id
+                WHERE l.est_wishlist = 0
+                GROUP BY l.id
+                ORDER BY avg_rating DESC NULLS LAST
+                LIMIT %s
+            ''', (limit,))
+            recommendations = cur.fetchall()
+        else:
+            # 2. Analyser les préférences (tags des livres bien notés)
+            book_ids_liked = [h['book_id'] for h in user_history if h.get('rating', 0) >= 4]
+            
+            if book_ids_liked:
+                # Récupérer les tags des livres aimés
+                cur.execute('''
+                    SELECT t.name, COUNT(*) as count
+                    FROM book_tags bt
+                    JOIN tags t ON bt.tag_id = t.id
+                    WHERE bt.book_id = ANY(%s)
+                    GROUP BY t.name
+                    ORDER BY count DESC
+                    LIMIT 5
+                ''', (book_ids_liked,))
+                preferred_tags = [row['name'] for row in cur.fetchall()]
+                
+                # Recommander des livres avec des tags similaires
+                cur.execute('''
+                    SELECT DISTINCT l.id, l.titre, l.auteur, l.proprietaire,
+                           COUNT(bt.tag_id) as matching_tags
+                    FROM livres l
+                    JOIN book_tags bt ON l.id = bt.book_id
+                    JOIN tags t ON bt.tag_id = t.id
+                    WHERE t.name = ANY(%s)
+                      AND l.est_wishlist = 0
+                      AND l.id NOT IN (
+                          SELECT book_id FROM loans WHERE user_id = %s
+                      )
+                    GROUP BY l.id
+                    ORDER BY matching_tags DESC, l.note DESC
+                    LIMIT %s
+                ''', (preferred_tags, user_id, limit))
+                recommendations = cur.fetchall()
+            else:
+                # Recommander des livres populaires non empruntés
+                cur.execute('''
+                    SELECT l.id, l.titre, l.auteur, l.proprietaire, l.note
+                    FROM livres l
+                    WHERE l.est_wishlist = 0
+                      AND l.id NOT IN (
+                          SELECT book_id FROM loans WHERE user_id = %s
+                      )
+                    ORDER BY l.note DESC
+                    LIMIT %s
+                ''', (user_id, limit))
+                recommendations = cur.fetchall()
+    
+    conn.close()
+    
+    result = {
+        'recommendations': recommendations,
+        'user_id': user_id
+    }
+    
+    set_in_cache(cache_key, result)
+    
+    return jsonify_with_transform(result), 200
+
+@app.route('/api/v1/ratings', methods=['POST'])
+@api_key_required
+def add_rating():
+    """Ajouter ou mettre à jour une évaluation"""
+    data = request.get_json()
+    book_id = data.get('book_id')
+    user_id = data.get('user_id')
+    rating = data.get('rating')
+    review = data.get('review', '')
+    
+    if not all([book_id, user_id, rating]):
+        return jsonify_with_transform({'message': 'book_id, user_id et rating sont obligatoires'}), 400
+    
+    if not (1 <= rating <= 5):
+        return jsonify_with_transform({'message': 'La note doit être entre 1 et 5'}), 400
+    
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute('''
+                INSERT INTO ratings (book_id, user_id, rating, review)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (book_id, user_id)
+                DO UPDATE SET rating = EXCLUDED.rating, review = EXCLUDED.review
+                RETURNING id
+            ''', (book_id, user_id, rating, review))
+            
+            rating_id = cur.fetchone()['id']
+            conn.commit()
+        conn.close()
+        clear_cache()
+        return jsonify_with_transform({'message': 'Évaluation enregistrée avec succès', 'id': rating_id}), 201
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify_with_transform({'message': f'Erreur: {str(e)}'}), 500
+
+# ====== ROUTES API POUR LES LIVRES (COLLECTION) - AVEC TAGS ======
+
 @app.route('/api/v1/stats', methods=['GET'])
 @api_key_required
 def get_stats():
-    """
-    Endpoint optimisé pour récupérer uniquement les statistiques
-    sans charger tous les livres
-    """
-    # Vérifier le cache
+    """Endpoint optimisé pour les statistiques"""
     cache_key = 'stats_global'
     cached_data = get_from_cache(cache_key)
     if cached_data:
-        return jsonify(cached_data), 200
+        return jsonify_with_transform(cached_data), 200
     
     conn = get_db_connection()
     
     with conn.cursor() as cur:
-        # ✅ Une seule requête optimisée pour les stats de la collection
         cur.execute('''
             SELECT 
                 COUNT(*) as total,
@@ -177,7 +948,6 @@ def get_stats():
         ''')
         stats_collection = cur.fetchone()
         
-        # ✅ Une seule requête optimisée pour les stats de la wishlist
         cur.execute('''
             SELECT 
                 COUNT(*) as total,
@@ -195,77 +965,88 @@ def get_stats():
         'wishlist': stats_wishlist
     }
     
-    # Mettre en cache
     set_in_cache(cache_key, result)
     
-    return jsonify(result), 200
-
-# ====== ROUTES API POUR LES LIVRES (COLLECTION) ======
+    return jsonify_with_transform(result), 200
 
 @app.route('/api/v1/books', methods=['GET'])
 @api_key_required
 def get_books():
-    # ✅ Paramètres de recherche
+    """Récupérer les livres avec tags et filtres"""
     search_query = request.args.get('query', '').strip()
     search_by = request.args.get('search_by', 'titre')
     proprietaire_filter = request.args.get('proprietaire', '')
     statut_filter = request.args.get('statut', '')
+    tags_filter = request.args.getlist('tags')  # Liste de tags
     
-    # ✅ Paramètres de tri
     sort_by = request.args.get('sort_by', 'titre')
     sort_dir = request.args.get('sort_dir', 'asc').upper()
     
-    # ✅ Pagination (optionnel)
     page = int(request.args.get('page', 1))
-    per_page = int(request.args.get('per_page', 1000))  # Par défaut, tous les livres
+    per_page = int(request.args.get('per_page', 1000))
     
-    # Validation du tri
     allowed_sort_columns = ['titre', 'auteur', 'note', 'proprietaire', 'statut_lecture', 'id']
     if sort_by not in allowed_sort_columns:
         sort_by = 'titre'
     if sort_dir not in ['ASC', 'DESC']:
         sort_dir = 'ASC'
     
-    # Construction de la clé de cache
-    cache_key = f'books_{search_query}_{search_by}_{proprietaire_filter}_{statut_filter}_{sort_by}_{sort_dir}_{page}_{per_page}'
+    cache_key = f'books_{search_query}_{search_by}_{proprietaire_filter}_{statut_filter}_{",".join(tags_filter)}_{sort_by}_{sort_dir}_{page}_{per_page}'
     cached_data = get_from_cache(cache_key)
     if cached_data:
-        return jsonify(cached_data), 200
+        return jsonify_with_transform(cached_data), 200
     
     conn = get_db_connection()
     
     with conn.cursor() as cur:
-        # ✅ Requête optimisée avec tri côté serveur
-        sql_query = 'SELECT id, titre, auteur, note, proprietaire, statut_lecture, est_wishlist FROM livres WHERE est_wishlist = 0'
+        sql_query = 'SELECT DISTINCT l.id, l.titre, l.auteur, l.note, l.proprietaire, l.statut_lecture, l.est_wishlist, l.category_id FROM livres l'
         params = []
+        where_clauses = ['l.est_wishlist = 0']
+        
+        # Filtre par tags
+        if tags_filter:
+            sql_query += '''
+                JOIN book_tags bt ON l.id = bt.book_id
+                JOIN tags t ON bt.tag_id = t.id
+            '''
+            where_clauses.append('t.name = ANY(%s)')
+            params.append(tags_filter)
 
         if search_query:
             if search_by == 'titre':
-                sql_query += ' AND titre ILIKE %s'
+                where_clauses.append('l.titre ILIKE %s')
             elif search_by == 'auteur':
-                sql_query += ' AND auteur ILIKE %s'
+                where_clauses.append('l.auteur ILIKE %s')
             params.append(f'%{search_query}%')
         
         if proprietaire_filter:
-            sql_query += ' AND proprietaire = %s'
+            where_clauses.append('l.proprietaire = %s')
             params.append(proprietaire_filter)
         
         if statut_filter:
-            sql_query += ' AND statut_lecture = %s'
+            where_clauses.append('l.statut_lecture = %s')
             params.append(statut_filter)
         
-        # ✅ Tri côté serveur
-        sql_query += f' ORDER BY {sort_by} {sort_dir}'
+        sql_query += ' WHERE ' + ' AND '.join(where_clauses)
+        sql_query += f' ORDER BY l.{sort_by} {sort_dir}'
         
-        # ✅ Pagination
-        if per_page < 1000:  # Seulement si pagination activée
+        if per_page < 1000:
             offset = (page - 1) * per_page
             sql_query += f' LIMIT {per_page} OFFSET {offset}'
         
         cur.execute(sql_query, params)
         livres = cur.fetchall()
         
-        # Stats (déjà optimisées)
+        # Récupérer les tags pour chaque livre
+        for livre in livres:
+            cur.execute('''
+                SELECT t.id, t.name
+                FROM tags t
+                JOIN book_tags bt ON t.id = bt.tag_id
+                WHERE bt.book_id = %s
+            ''', [livre['id']])
+            livre['tags'] = cur.fetchall()
+        
         cur.execute('''
             SELECT 
                 COUNT(*) as total,
@@ -287,26 +1068,24 @@ def get_books():
         'stats': stats
     }
     
-    # Mettre en cache
     set_in_cache(cache_key, result)
     
-    return jsonify(result), 200
+    return jsonify_with_transform(result), 200
 
 @app.route('/api/v1/books/<int:book_id>', methods=['GET'])
 @api_key_required
 def get_book_by_id(book_id):
-    # Vérifier le cache
     cache_key = f'book_{book_id}'
     cached_data = get_from_cache(cache_key)
     if cached_data:
-        return jsonify(cached_data), 200
+        return jsonify_with_transform(cached_data), 200
     
     book = get_book_by_id_helper(book_id, is_wishlist=False)
     if book:
         set_in_cache(cache_key, book)
-        return jsonify(book), 200
+        return jsonify_with_transform(book), 200
     else:
-        return jsonify({'message': 'Livre non trouvé dans la collection'}), 404
+        return jsonify_with_transform({'message': 'Livre non trouvé dans la collection'}), 404
 
 @app.route('/api/v1/books', methods=['POST'])
 @api_key_required
@@ -318,37 +1097,56 @@ def add_book():
     note = int(data.get('note', 0))
     proprietaire = data.get('proprietaire', 'J')
     statut_lecture = data.get('statut_lecture', 'lu')
+    category_id = data.get('category_id')
+    tags = data.get('tags', [])  # Liste de tags
     est_wishlist = 0
 
     if not titre or not auteur:
-        return jsonify({'message': 'Le titre et l\'auteur sont obligatoires'}), 400
+        return jsonify_with_transform({'message': 'Le titre et l\'auteur sont obligatoires'}), 400
 
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                'INSERT INTO livres (titre, auteur, note, proprietaire, statut_lecture, est_wishlist) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id',
-                (titre, auteur, note, proprietaire, statut_lecture, est_wishlist)
+                'INSERT INTO livres (titre, auteur, note, proprietaire, statut_lecture, est_wishlist, category_id) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id',
+                (titre, auteur, note, proprietaire, statut_lecture, est_wishlist, category_id)
             )
             new_book_id = cur.fetchone()['id']
+            
+            # Ajouter les tags
+            for tag_name in tags:
+                tag_name = tag_name.strip().lower()
+                if tag_name:
+                    # Créer le tag s'il n'existe pas
+                    cur.execute('SELECT id FROM tags WHERE name = %s', (tag_name,))
+                    tag = cur.fetchone()
+                    
+                    if not tag:
+                        cur.execute('INSERT INTO tags (name) VALUES (%s) RETURNING id', (tag_name,))
+                        tag_id = cur.fetchone()['id']
+                    else:
+                        tag_id = tag['id']
+                    
+                    # Associer le tag au livre
+                    cur.execute('INSERT INTO book_tags (book_id, tag_id) VALUES (%s, %s)', (new_book_id, tag_id))
+            
             conn.commit()
         conn.close()
         
-        # ✅ IMPORTANT : Vider le cache après modification
         clear_cache()
         
-        return jsonify({'message': 'Livre ajouté à la collection avec succès !', 'id': new_book_id}), 201
+        return jsonify_with_transform({'message': 'Livre ajouté à la collection avec succès !', 'id': new_book_id}), 201
     except Exception as e:
         conn.rollback()
         conn.close()
-        return jsonify({'message': f'Erreur lors de l\'ajout du livre: {str(e)}'}), 500
+        return jsonify_with_transform({'message': f'Erreur lors de l\'ajout du livre: {str(e)}'}), 500
 
 @app.route('/api/v1/books/<int:book_id>', methods=['PUT'])
 @api_key_required
 def update_book(book_id):
     book_exists = get_book_by_id_helper(book_id, is_wishlist=False)
     if not book_exists:
-        return jsonify({'message': 'Livre non trouvé dans la collection'}), 404
+        return jsonify_with_transform({'message': 'Livre non trouvé dans la collection'}), 404
 
     data = request.get_json()
     
@@ -357,28 +1155,50 @@ def update_book(book_id):
     note = int(data.get('note', 0))
     proprietaire = data.get('proprietaire')
     statut_lecture = data.get('statut_lecture')
+    category_id = data.get('category_id')
+    tags = data.get('tags')
     
     if not titre or not auteur:
-        return jsonify({'message': 'Le titre et l\'auteur sont obligatoires'}), 400
+        return jsonify_with_transform({'message': 'Le titre et l\'auteur sont obligatoires'}), 400
 
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                'UPDATE livres SET titre = %s, auteur = %s, note = %s, proprietaire = %s, statut_lecture = %s WHERE id = %s AND est_wishlist = 0',
-                (titre, auteur, note, proprietaire, statut_lecture, book_id)
+                'UPDATE livres SET titre = %s, auteur = %s, note = %s, proprietaire = %s, statut_lecture = %s, category_id = %s WHERE id = %s AND est_wishlist = 0',
+                (titre, auteur, note, proprietaire, statut_lecture, category_id, book_id)
             )
+            
+            # Mettre à jour les tags si fournis
+            if tags is not None:
+                # Supprimer les anciens tags
+                cur.execute('DELETE FROM book_tags WHERE book_id = %s', (book_id,))
+                
+                # Ajouter les nouveaux tags
+                for tag_name in tags:
+                    tag_name = tag_name.strip().lower()
+                    if tag_name:
+                        cur.execute('SELECT id FROM tags WHERE name = %s', (tag_name,))
+                        tag = cur.fetchone()
+                        
+                        if not tag:
+                            cur.execute('INSERT INTO tags (name) VALUES (%s) RETURNING id', (tag_name,))
+                            tag_id = cur.fetchone()['id']
+                        else:
+                            tag_id = tag['id']
+                        
+                        cur.execute('INSERT INTO book_tags (book_id, tag_id) VALUES (%s, %s)', (book_id, tag_id))
+            
             conn.commit()
         conn.close()
         
-        # ✅ IMPORTANT : Vider le cache après modification
         clear_cache()
         
-        return jsonify({'message': f'Le livre ID {book_id} a été mis à jour dans la collection !'}), 200
+        return jsonify_with_transform({'message': f'Le livre ID {book_id} a été mis à jour dans la collection !'}), 200
     except Exception as e:
         conn.rollback()
         conn.close()
-        return jsonify({'message': f'Erreur lors de la mise à jour du livre: {str(e)}'}), 500
+        return jsonify_with_transform({'message': f'Erreur lors de la mise à jour du livre: {str(e)}'}), 500
 
 @app.route('/api/v1/books/<int:book_id>', methods=['DELETE'])
 @api_key_required
@@ -393,16 +1213,15 @@ def delete_book(book_id):
                 conn.commit()
             conn.close()
             
-            # ✅ IMPORTANT : Vider le cache après modification
             clear_cache()
             
-            return jsonify({'message': f'Le livre "{book_db["titre"]}" a été supprimé de la collection.'}), 200
+            return jsonify_with_transform({'message': f'Le livre "{book_db["titre"]}" a été supprimé de la collection.'}), 200
         except Exception as e:
             conn.rollback()
             conn.close()
-            return jsonify({'message': f'Erreur lors de la suppression du livre: {str(e)}'}), 500
+            return jsonify_with_transform({'message': f'Erreur lors de la suppression du livre: {str(e)}'}), 500
     else:
-        return jsonify({'message': 'Livre non trouvé dans la collection'}), 404
+        return jsonify_with_transform({'message': 'Livre non trouvé dans la collection'}), 404
 
 # ====== ROUTES API POUR LA WISHLIST ======
 
@@ -412,22 +1231,19 @@ def get_wishlist():
     search_query = request.args.get('query', '').strip()
     search_by = request.args.get('search_by', 'titre')
     
-    # ✅ Paramètres de tri
     sort_by = request.args.get('sort_by', 'titre')
     sort_dir = request.args.get('sort_dir', 'asc').upper()
     
-    # Validation du tri
     allowed_sort_columns = ['titre', 'auteur', 'proprietaire', 'id']
     if sort_by not in allowed_sort_columns:
         sort_by = 'titre'
     if sort_dir not in ['ASC', 'DESC']:
         sort_dir = 'ASC'
     
-    # Cache
     cache_key = f'wishlist_{search_query}_{search_by}_{sort_by}_{sort_dir}'
     cached_data = get_from_cache(cache_key)
     if cached_data:
-        return jsonify(cached_data), 200
+        return jsonify_with_transform(cached_data), 200
     
     conn = get_db_connection()
     
@@ -442,7 +1258,6 @@ def get_wishlist():
                 sql_query += ' AND auteur ILIKE %s'
             params.append(f'%{search_query}%')
         
-        # ✅ Tri côté serveur
         sql_query += f' ORDER BY {sort_by} {sort_dir}'
         
         cur.execute(sql_query, params)
@@ -465,26 +1280,24 @@ def get_wishlist():
         'stats': stats_wishlist
     }
     
-    # Cache
     set_in_cache(cache_key, result)
     
-    return jsonify(result), 200
+    return jsonify_with_transform(result), 200
 
 @app.route('/api/v1/wishlist/<int:book_id>', methods=['GET'])
 @api_key_required
 def get_wishlist_book_by_id(book_id):
-    # Cache
     cache_key = f'wishlist_book_{book_id}'
     cached_data = get_from_cache(cache_key)
     if cached_data:
-        return jsonify(cached_data), 200
+        return jsonify_with_transform(cached_data), 200
     
     book = get_book_by_id_helper(book_id, is_wishlist=True)
     if book:
         set_in_cache(cache_key, book)
-        return jsonify(book), 200
+        return jsonify_with_transform(book), 200
     else:
-        return jsonify({'message': 'Livre non trouvé dans la wishlist'}), 404
+        return jsonify_with_transform({'message': 'Livre non trouvé dans la wishlist'}), 404
 
 @app.route('/api/v1/wishlist', methods=['POST'])
 @api_key_required
@@ -497,7 +1310,7 @@ def add_to_wishlist():
     est_wishlist = 1 
 
     if not titre or not auteur:
-        return jsonify({'message': 'Le titre et l\'auteur sont obligatoires'}), 400
+        return jsonify_with_transform({'message': 'Le titre et l\'auteur sont obligatoires'}), 400
 
     conn = get_db_connection()
     try:
@@ -510,21 +1323,20 @@ def add_to_wishlist():
             conn.commit()
         conn.close()
         
-        # ✅ Vider le cache
         clear_cache()
         
-        return jsonify({'message': 'Livre ajouté à la wishlist avec succès !', 'id': new_book_id}), 201
+        return jsonify_with_transform({'message': 'Livre ajouté à la wishlist avec succès !', 'id': new_book_id}), 201
     except Exception as e:
         conn.rollback()
         conn.close()
-        return jsonify({'message': f'Erreur lors de l\'ajout à la wishlist: {str(e)}'}), 500
+        return jsonify_with_transform({'message': f'Erreur lors de l\'ajout à la wishlist: {str(e)}'}), 500
 
 @app.route('/api/v1/wishlist/<int:book_id>', methods=['PUT'])
 @api_key_required
 def update_wishlist_book(book_id):
     book_exists = get_book_by_id_helper(book_id, is_wishlist=True)
     if not book_exists:
-        return jsonify({'message': 'Livre non trouvé dans la wishlist'}), 404
+        return jsonify_with_transform({'message': 'Livre non trouvé dans la wishlist'}), 404
 
     data = request.get_json()
     
@@ -533,7 +1345,7 @@ def update_wishlist_book(book_id):
     proprietaire = data.get('proprietaire')
 
     if not titre or not auteur:
-        return jsonify({'message': 'Le titre et l\'auteur sont obligatoires'}), 400
+        return jsonify_with_transform({'message': 'Le titre et l\'auteur sont obligatoires'}), 400
 
     conn = get_db_connection()
     try:
@@ -545,14 +1357,13 @@ def update_wishlist_book(book_id):
             conn.commit()
         conn.close()
         
-        # ✅ Vider le cache
         clear_cache()
         
-        return jsonify({'message': f'Le livre ID {book_id} a été mis à jour dans la wishlist !'}), 200
+        return jsonify_with_transform({'message': f'Le livre ID {book_id} a été mis à jour dans la wishlist !'}), 200
     except Exception as e:
         conn.rollback()
         conn.close()
-        return jsonify({'message': f'Erreur lors de la mise à jour du livre dans la wishlist: {str(e)}'}), 500
+        return jsonify_with_transform({'message': f'Erreur lors de la mise à jour du livre dans la wishlist: {str(e)}'}), 500
 
 @app.route('/api/v1/wishlist/<int:book_id>', methods=['DELETE'])
 @api_key_required
@@ -567,16 +1378,15 @@ def delete_wishlist_book(book_id):
                 conn.commit()
             conn.close()
             
-            # ✅ Vider le cache
             clear_cache()
             
-            return jsonify({'message': f'Le livre "{book_db["titre"]}" a été supprimé de la wishlist.'}), 200
+            return jsonify_with_transform({'message': f'Le livre "{book_db["titre"]}" a été supprimé de la wishlist.'}), 200
         except Exception as e:
             conn.rollback()
             conn.close()
-            return jsonify({'message': f'Erreur lors de la suppression du livre: {str(e)}'}), 500
+            return jsonify_with_transform({'message': f'Erreur lors de la suppression du livre: {str(e)}'}), 500
     else:
-        return jsonify({'message': 'Livre non trouvé dans la wishlist'}), 404
+        return jsonify_with_transform({'message': 'Livre non trouvé dans la wishlist'}), 404
 
 @app.route('/api/v1/wishlist/<int:book_id>/move_to_collection', methods=['POST'])
 @api_key_required
@@ -594,30 +1404,28 @@ def move_to_collection(book_id):
                 conn.commit()
             conn.close()
             
-            # ✅ Vider le cache
             clear_cache()
             
-            return jsonify({'message': f'Le livre "{book["titre"]}" a été ajouté à votre collection !'}), 200
+            return jsonify_with_transform({'message': f'Le livre "{book["titre"]}" a été ajouté à votre collection !'}), 200
         except Exception as e:
             conn.rollback()
             conn.close()
-            return jsonify({'message': f'Erreur lors du déplacement du livre: {str(e)}'}), 500
+            return jsonify_with_transform({'message': f'Erreur lors du déplacement du livre: {str(e)}'}), 500
     else:
-        return jsonify({'message': 'Livre non trouvé dans la wishlist'}), 404
+        return jsonify_with_transform({'message': 'Livre non trouvé dans la wishlist'}), 404
 
-# ✅ Endpoint pour vider manuellement le cache (utile pour le debug)
+# ====== AUTRES ENDPOINTS ======
+
 @app.route('/api/v1/cache/clear', methods=['POST'])
 @api_key_required
 def clear_cache_endpoint():
     clear_cache()
-    return jsonify({'message': 'Cache vidé avec succès'}), 200
+    return jsonify_with_transform({'message': 'Cache vidé avec succès'}), 200
 
-# ✅ Endpoint de santé (health check)
 @app.route('/api/v1/health', methods=['GET'])
 def health_check():
     """Endpoint pour vérifier que l'API fonctionne"""
     try:
-        # Test de connexion à la base de données
         conn = get_db_connection()
         with conn.cursor() as cur:
             cur.execute('SELECT 1')
@@ -626,7 +1434,7 @@ def health_check():
     except Exception as e:
         db_status = f'error: {str(e)}'
     
-    return jsonify({
+    return jsonify_with_transform({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
         'cache_size': len(cache_store),
@@ -636,15 +1444,15 @@ def health_check():
 # ====== GESTION DES ERREURS API ======
 @app.errorhandler(404)
 def not_found(error):
-    return jsonify({'message': 'Ressource non trouvée', 'error': str(error)}), 404
+    return jsonify_with_transform({'message': 'Ressource non trouvée', 'error': str(error)}), 404
 
 @app.errorhandler(405)
 def method_not_allowed(error):
-    return jsonify({'message': 'Méthode non autorisée pour cette ressource', 'error': str(error)}), 405
+    return jsonify_with_transform({'message': 'Méthode non autorisée pour cette ressource', 'error': str(error)}), 405
 
 @app.errorhandler(500)
 def internal_error(error):
-    return jsonify({'message': 'Erreur interne du serveur', 'error': str(error)}), 500
+    return jsonify_with_transform({'message': 'Erreur interne du serveur', 'error': str(error)}), 500
 
 # ====== Point d'entrée pour l'exécution locale ======
 if __name__ == '__main__':

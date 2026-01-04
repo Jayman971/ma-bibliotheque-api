@@ -8,13 +8,13 @@
     <!-- SEO & Description -->
     <title>Ma Bibliothèque - Gestion de Collection de Livres</title>
     <meta name="description" content="Gérez votre collection de livres, organisez votre wishlist et suivez vos lectures avec Ma Bibliothèque">
-    <meta name="keywords" content="bibliothèque, livres, collection, wishlist, lecture, gestion">
+    <meta name="keywords" content="bibliothèque, livres, collection, wishlist, lecture, gestion, prêts, recommandations">
     <meta name="author" content="Ma Bibliothèque">
     
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website">
     <meta property="og:title" content="Ma Bibliothèque - Gestion de Collection">
-    <meta property="og:description" content="Organisez vos livres et gérez votre wishlist">
+    <meta property="og:description" content="Organisez vos livres, gérez vos prêts et découvrez des recommandations personnalisées">
     <meta property="og:image" content="/icon-512.png">
     
     <!-- Twitter -->
@@ -41,24 +41,47 @@
           crossorigin="anonymous" referrerpolicy="no-referrer">
     
     <!-- ✅ Configuration de l'API -->
-<script>
-    const API_CONFIG = {
-        BASE_URL: 'https://ma-bibliotheque-api.onrender.com/api/v1',
-        HEALTH_CHECK_INTERVAL: 60000,
-        CACHE_DURATION: 60000
-    };
-</script>
+    <script>
+        const API_CONFIG = {
+            BASE_URL: 'https://ma-bibliotheque-api.onrender.com/api/v1',
+            HEALTH_CHECK_INTERVAL: 60000,
+            CACHE_DURATION: 60000,
+            AUTOCOMPLETE_DELAY: 300, // ms
+            DEFAULT_USER_ID: 1 // ID utilisateur par défaut pour les recommandations et prêts
+        };
+    </script>
     
     <!-- ✅ Preconnect pour optimiser les performances -->
     <link rel="preconnect" href="https://ma-bibliotheque-api.onrender.com">
     <link rel="dns-prefetch" href="https://ma-bibliotheque-api.onrender.com">
 </head>
-<body>
+<body class="light-mode">
     <!-- Header avec navigation -->
     <header>
-        <h1 class="app-title">
-            <i class="fas fa-book-open"></i> Ma Bibliothèque
-        </h1>
+        <div class="header-content">
+            <h1 class="app-title">
+                <i class="fas fa-book-open"></i> Ma Bibliothèque
+            </h1>
+            
+            <!-- ✅ Toggle Mode Sombre -->
+            <div class="header-controls">
+                <button id="darkModeToggle" class="icon-btn" title="Basculer le mode sombre" aria-label="Basculer le mode sombre">
+                    <i class="fas fa-moon"></i>
+                </button>
+                
+                <!-- Bouton notifications (prêts en retard) -->
+                <button id="notificationsBtn" class="icon-btn" title="Notifications" aria-label="Notifications" style="display: none;">
+                    <i class="fas fa-bell"></i>
+                    <span class="notification-badge" id="notificationBadge" style="display: none;"></span>
+                </button>
+                
+                <!-- Bouton profil utilisateur -->
+                <button id="userProfileBtn" class="icon-btn" title="Profil" aria-label="Profil utilisateur" style="display: none;">
+                    <i class="fas fa-user-circle"></i>
+                </button>
+            </div>
+        </div>
+        
         <nav id="mainNav" role="navigation" aria-label="Navigation principale">
             <!-- Les boutons de navigation seront injectés ici par JavaScript après connexion -->
         </nav>
@@ -73,6 +96,185 @@
         </div>
     </main>
 
+    <!-- ✅ MODALS ET OVERLAYS -->
+    
+    <!-- Modal pour ajouter/modifier un livre -->
+    <div id="bookModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="bookModalTitle">Ajouter un livre</h2>
+                <button class="modal-close" onclick="closeBookModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="bookForm">
+                    <input type="hidden" id="bookId" value="">
+                    
+                    <div class="form-group">
+                        <label for="bookTitre">Titre <span class="required">*</span></label>
+                        <input type="text" id="bookTitre" required autocomplete="off">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="bookAuteur">Auteur <span class="required">*</span></label>
+                        <input type="text" id="bookAuteur" required autocomplete="off">
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="bookNote">Note</label>
+                            <div class="star-rating" id="starRating">
+                                <i class="far fa-star" data-rating="1"></i>
+                                <i class="far fa-star" data-rating="2"></i>
+                                <i class="far fa-star" data-rating="3"></i>
+                                <i class="far fa-star" data-rating="4"></i>
+                                <i class="far fa-star" data-rating="5"></i>
+                            </div>
+                            <input type="hidden" id="bookNote" value="0">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="bookProprietaire">Propriétaire</label>
+                            <select id="bookProprietaire">
+                                <option value="J">Jérémy</option>
+                                <option value="K">Kelly</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="bookStatut">Statut de lecture</label>
+                            <select id="bookStatut">
+                                <option value="lu">Lu</option>
+                                <option value="en_cours">En cours</option>
+                                <option value="a_lire">À lire</option>
+                            </select>
+                        </div>
+                        
+                        <!-- ✅ Catégories -->
+                        <div class="form-group">
+                            <label for="bookCategory">Catégorie</label>
+                            <select id="bookCategory">
+                                <option value="">Aucune</option>
+                                <!-- Les catégories seront chargées dynamiquement -->
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <!-- ✅ Tags -->
+                    <div class="form-group">
+                        <label for="bookTags">Tags (séparés par des virgules)</label>
+                        <input type="text" id="bookTags" placeholder="fantasy, aventure, thriller...">
+                        <div class="tags-suggestions" id="tagsSuggestions" style="display: none;"></div>
+                        <div class="selected-tags" id="selectedTags"></div>
+                    </div>
+                    
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-secondary" onclick="closeBookModal()">Annuler</button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save"></i> Enregistrer
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- ✅ Modal pour les prêts -->
+    <div id="loanModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="loanModalTitle">Nouveau prêt</h2>
+                <button class="modal-close" onclick="closeLoanModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="loanForm">
+                    <input type="hidden" id="loanBookId" value="">
+                    
+                    <div class="form-group">
+                        <label for="loanUser">Emprunté par <span class="required">*</span></label>
+                        <select id="loanUser" required>
+                            <option value="">Sélectionner un utilisateur</option>
+                            <!-- Les utilisateurs seront chargés dynamiquement -->
+                        </select>
+                        <button type="button" class="btn-link" onclick="showAddUserForm()">
+                            <i class="fas fa-plus"></i> Ajouter un utilisateur
+                        </button>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="loanDuration">Durée du prêt (jours)</label>
+                        <input type="number" id="loanDuration" value="14" min="1" max="90">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Date d'échéance calculée</label>
+                        <p id="calculatedDueDate" class="info-text"></p>
+                    </div>
+                    
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-secondary" onclick="closeLoanModal()">Annuler</button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-handshake"></i> Créer le prêt
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- ✅ Modal pour ajouter un utilisateur -->
+    <div id="userModal" class="modal" style="display: none;">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h2>Nouvel utilisateur</h2>
+                <button class="modal-close" onclick="closeUserModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="userForm">
+                    <div class="form-group">
+                        <label for="userName">Nom <span class="required">*</span></label>
+                        <input type="text" id="userName" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="userEmail">Email (optionnel)</label>
+                        <input type="email" id="userEmail">
+                    </div>
+                    
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-secondary" onclick="closeUserModal()">Annuler</button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-user-plus"></i> Ajouter
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- ✅ Modal de confirmation -->
+    <div id="confirmModal" class="modal" style="display: none;">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h2 id="confirmTitle">Confirmation</h2>
+                <button class="modal-close" onclick="closeConfirmModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="confirmMessage"></p>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeConfirmModal()">Annuler</button>
+                    <button type="button" id="confirmBtn" class="btn btn-danger">
+                        <i class="fas fa-check"></i> Confirmer
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- ✅ Toast notifications -->
+    <div id="toastContainer" class="toast-container"></div>
+
     <!-- Footer -->
     <footer>
         <p>
@@ -83,13 +285,53 @@
                 <i class="fas fa-circle" id="apiStatusIcon" style="color: #95a5a6;"></i> 
                 <span id="apiStatusText">API Status</span>
             </a>
+            <span class="separator">•</span>
+            <span id="footerStats">Chargement...</span>
         </p>
     </footer>
 
     <!-- Scripts -->
     <script src="script.js"></script>
     
-    <!-- ✅ Script amélioré pour vérifier le statut de l'API -->
+    <!-- ✅ Script pour le mode sombre -->
+    <script>
+        // Initialiser le mode sombre depuis localStorage
+        document.addEventListener('DOMContentLoaded', () => {
+            const savedTheme = localStorage.getItem('darkMode');
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            
+            if (savedTheme === 'true' || (savedTheme === null && prefersDark)) {
+                document.body.classList.remove('light-mode');
+                document.body.classList.add('dark-mode');
+                updateDarkModeIcon(true);
+            }
+            
+            // Toggle mode sombre
+            document.getElementById('darkModeToggle')?.addEventListener('click', toggleDarkMode);
+        });
+        
+        function toggleDarkMode() {
+            const isDark = document.body.classList.toggle('dark-mode');
+            document.body.classList.toggle('light-mode');
+            
+            localStorage.setItem('darkMode', isDark);
+            updateDarkModeIcon(isDark);
+            
+            // Sauvegarder la préférence sur le serveur si connecté
+            if (typeof saveDarkModePreference === 'function') {
+                saveDarkModePreference(isDark);
+            }
+        }
+        
+        function updateDarkModeIcon(isDark) {
+            const icon = document.querySelector('#darkModeToggle i');
+            if (icon) {
+                icon.className = isDark ? 'fas fa-sun' : 'fas fa-moon';
+            }
+        }
+    </script>
+    
+    <!-- ✅ Script pour vérifier le statut de l'API -->
     <script>
         // Ouvrir la page de health check dans un nouvel onglet
         function openApiHealth() {
@@ -104,7 +346,7 @@
             
             try {
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 5000); // Timeout de 5s
+                const timeoutId = setTimeout(() => controller.abort(), 5000);
                 
                 const response = await fetch(
                     API_CONFIG.BASE_URL.replace('/api/v1', '/api/v1/health'),
@@ -119,25 +361,24 @@
                 
                 const data = await response.json();
                 
-                // ✅ Vérification compatible avec le nouveau backend PostgreSQL
                 if (data.status === 'healthy' && data.database === 'connected') {
-                    icon.style.color = '#28a745'; // Vert
+                    icon.style.color = '#28a745';
                     icon.className = 'fas fa-circle';
                     text.textContent = 'API opérationnelle';
-                    link.title = `Dernière vérification: ${new Date().toLocaleTimeString('fr-FR')}\nBase de données: connectée`;
+                    link.title = `Dernière vérification: ${new Date().toLocaleTimeString('fr-FR')}\nBase de données: connectée\nCache: ${data.cache_size || 0} entrées`;
                 } else if (data.status === 'healthy') {
-                    icon.style.color = '#ffc107'; // Orange
+                    icon.style.color = '#ffc107';
                     icon.className = 'fas fa-exclamation-circle';
                     text.textContent = 'API (DB issue)';
                     link.title = `Base de données: ${data.database || 'déconnectée'}`;
                 } else {
-                    icon.style.color = '#ffc107'; // Orange
+                    icon.style.color = '#ffc107';
                     icon.className = 'fas fa-exclamation-triangle';
                     text.textContent = 'API dégradée';
                     link.title = 'API partiellement disponible';
                 }
             } catch (error) {
-                icon.style.color = '#dc3545'; // Rouge
+                icon.style.color = '#dc3545';
                 icon.className = 'fas fa-times-circle';
                 text.textContent = 'API indisponible';
                 link.title = `Erreur: ${error.message}\nDernière tentative: ${new Date().toLocaleTimeString('fr-FR')}`;
@@ -149,7 +390,86 @@
         document.addEventListener('DOMContentLoaded', () => {
             checkApiStatus();
             setInterval(checkApiStatus, API_CONFIG.HEALTH_CHECK_INTERVAL);
+            updateFooterStats();
         });
+        
+        // ✅ Mettre à jour les stats du footer
+        async function updateFooterStats() {
+            const statsElement = document.getElementById('footerStats');
+            if (!statsElement) return;
+            
+            try {
+                // Cette fonction sera implémentée dans script.js
+                if (typeof getQuickStats === 'function') {
+                    const stats = await getQuickStats();
+                    statsElement.textContent = `${stats.total || 0} livres • ${stats.loans || 0} prêts actifs`;
+                }
+            } catch (error) {
+                statsElement.textContent = 'Stats non disponibles';
+            }
+        }
+        
+        // Mettre à jour les stats toutes les 5 minutes
+        setInterval(updateFooterStats, 300000);
+    </script>
+    
+    <!-- ✅ Script pour les étoiles et la date d'échéance -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Système de notation par étoiles
+            const stars = document.querySelectorAll('#starRating i');
+            const noteInput = document.getElementById('bookNote');
+            
+            stars.forEach(star => {
+                star.addEventListener('click', () => {
+                    const rating = parseInt(star.getAttribute('data-rating'));
+                    noteInput.value = rating;
+                    updateStarDisplay(rating);
+                });
+                
+                star.addEventListener('mouseenter', () => {
+                    const rating = parseInt(star.getAttribute('data-rating'));
+                    updateStarDisplay(rating, true);
+                });
+            });
+            
+            document.getElementById('starRating')?.addEventListener('mouseleave', () => {
+                updateStarDisplay(parseInt(noteInput.value));
+            });
+            
+            // Calculer la date d'échéance
+            const loanDurationInput = document.getElementById('loanDuration');
+            if (loanDurationInput) {
+                loanDurationInput.addEventListener('input', updateCalculatedDueDate);
+            }
+        });
+        
+        function updateStarDisplay(rating, isHover = false) {
+            const stars = document.querySelectorAll('#starRating i');
+            stars.forEach((star, index) => {
+                if (index < rating) {
+                    star.className = 'fas fa-star';
+                } else {
+                    star.className = isHover ? 'far fa-star' : 'far fa-star';
+                }
+            });
+        }
+        
+        function updateCalculatedDueDate() {
+            const duration = parseInt(document.getElementById('loanDuration')?.value || 14);
+            const dueDate = new Date();
+            dueDate.setDate(dueDate.getDate() + duration);
+            
+            const dueDateElement = document.getElementById('calculatedDueDate');
+            if (dueDateElement) {
+                dueDateElement.textContent = dueDate.toLocaleDateString('fr-FR', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                });
+            }
+        }
     </script>
 </body>
 </html>
