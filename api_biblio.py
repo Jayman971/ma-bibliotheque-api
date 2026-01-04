@@ -1,4 +1,4 @@
-# api_biblio.py - Version NETTOYÉE sans tags ni catégories
+# api_biblio.py - Version NETTOYÉE sans tags, catégories ni recommandations
 
 from flask import Flask, request, jsonify
 from functools import wraps
@@ -184,21 +184,6 @@ def create_tables():
                 status TEXT DEFAULT 'active' CHECK(status IN ('active', 'returned', 'overdue')),
                 FOREIGN KEY (book_id) REFERENCES livres(id) ON DELETE CASCADE,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-            )
-        ''')
-        
-        # ✅ Table des évaluations (pour les recommandations)
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS ratings (
-                id SERIAL PRIMARY KEY,
-                book_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                rating INTEGER CHECK(rating BETWEEN 1 AND 5),
-                review TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (book_id) REFERENCES livres(id) ON DELETE CASCADE,
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-                UNIQUE(book_id, user_id)
             )
         ''')
         
@@ -565,109 +550,6 @@ def check_book_availability(book_id):
             'available': True,
             'loan': None
         }), 200
-
-# ====== SYSTÈME DE RECOMMANDATION ======
-
-@app.route('/api/v1/recommendations/<int:user_id>', methods=['GET'])
-@api_key_required
-def get_recommendations(user_id):
-    """
-    Système de recommandation basé sur:
-    1. Les livres lus par l'utilisateur
-    2. Les notes qu'il a données
-    """
-    limit = int(request.args.get('limit', 5))
-    
-    cache_key = f'recommendations_{user_id}_{limit}'
-    cached_data = get_from_cache(cache_key)
-    if cached_data:
-        return jsonify_with_transform(cached_data), 200
-    
-    conn = get_db_connection()
-    with conn.cursor() as cur:
-        # 1. Récupérer l'historique de l'utilisateur
-        cur.execute('''
-            SELECT l.book_id, b.titre, b.auteur, b.proprietaire, r.rating
-            FROM loans l
-            JOIN livres b ON l.book_id = b.id
-            LEFT JOIN ratings r ON r.book_id = l.book_id AND r.user_id = %s
-            WHERE l.user_id = %s AND l.status = 'returned'
-        ''', (user_id, user_id))
-        user_history = cur.fetchall()
-        
-        if not user_history:
-            # Pas d'historique, recommander les livres les mieux notés
-            cur.execute('''
-                SELECT l.id, l.titre, l.auteur, l.proprietaire, AVG(r.rating) as avg_rating
-                FROM livres l
-                LEFT JOIN ratings r ON l.id = r.book_id
-                WHERE l.est_wishlist = 0
-                GROUP BY l.id
-                ORDER BY avg_rating DESC NULLS LAST
-                LIMIT %s
-            ''', (limit,))
-            recommendations = cur.fetchall()
-        else:
-            # Recommander des livres populaires non empruntés
-            cur.execute('''
-                SELECT l.id, l.titre, l.auteur, l.proprietaire, l.note
-                FROM livres l
-                WHERE l.est_wishlist = 0
-                  AND l.id NOT IN (
-                      SELECT book_id FROM loans WHERE user_id = %s
-                  )
-                ORDER BY l.note DESC
-                LIMIT %s
-            ''', (user_id, limit))
-            recommendations = cur.fetchall()
-    
-    conn.close()
-    
-    result = {
-        'recommendations': recommendations,
-        'user_id': user_id
-    }
-    
-    set_in_cache(cache_key, result)
-    
-    return jsonify_with_transform(result), 200
-
-@app.route('/api/v1/ratings', methods=['POST'])
-@api_key_required
-def add_rating():
-    """Ajouter ou mettre à jour une évaluation"""
-    data = request.get_json()
-    book_id = data.get('book_id')
-    user_id = data.get('user_id')
-    rating = data.get('rating')
-    review = data.get('review', '')
-    
-    if not all([book_id, user_id, rating]):
-        return jsonify_with_transform({'message': 'book_id, user_id et rating sont obligatoires'}), 400
-    
-    if not (1 <= rating <= 5):
-        return jsonify_with_transform({'message': 'La note doit être entre 1 et 5'}), 400
-    
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute('''
-                INSERT INTO ratings (book_id, user_id, rating, review)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (book_id, user_id)
-                DO UPDATE SET rating = EXCLUDED.rating, review = EXCLUDED.review
-                RETURNING id
-            ''', (book_id, user_id, rating, review))
-            
-            rating_id = cur.fetchone()['id']
-            conn.commit()
-        conn.close()
-        clear_cache()
-        return jsonify_with_transform({'message': 'Évaluation enregistrée avec succès', 'id': rating_id}), 201
-    except Exception as e:
-        conn.rollback()
-        conn.close()
-        return jsonify_with_transform({'message': f'Erreur: {str(e)}'}), 500
 
 # ====== ROUTES API POUR LES LIVRES (COLLECTION) ======
 

@@ -436,7 +436,6 @@ const pages = {
     'wishlist': renderBookListPage,
     'addBook': renderAddEditBookForm,
     'loans': renderLoansPage,
-    'recommendations': renderRecommendationsPage,
     'users': renderUsersPage,
     'login': renderLoginPage
 };
@@ -471,7 +470,6 @@ function renderNavigation() {
             <button id="collectionBtn"><i class="fas fa-book"></i> Collection</button>
             <button id="wishlistBtn"><i class="fas fa-heart"></i> Wishlist</button>
             <button id="loansBtn"><i class="fas fa-handshake"></i> Prêts</button>
-            <button id="recommendationsBtn"><i class="fas fa-magic"></i> Suggestions</button>
             <button id="usersBtn"><i class="fas fa-users"></i> Utilisateurs</button>
         </div>
         <div class="nav-right">
@@ -486,7 +484,6 @@ function renderNavigation() {
     document.getElementById('collectionBtn').addEventListener('click', () => showPage('collection', { isWishlist: false }));
     document.getElementById('wishlistBtn').addEventListener('click', () => showPage('wishlist', { isWishlist: true }));
     document.getElementById('loansBtn').addEventListener('click', () => showPage('loans'));
-    document.getElementById('recommendationsBtn').addEventListener('click', () => showPage('recommendations'));
     document.getElementById('usersBtn').addEventListener('click', () => showPage('users'));
     document.getElementById('addBookBtn').addEventListener('click', () => openAddBookModal());
     document.getElementById('logoutBtn').addEventListener('click', logout);
@@ -1600,72 +1597,6 @@ async function extendLoan(loanId) {
         loadLoans();
     } catch (error) {
         hideLoader();
-    }
-}
-
-// ====== PAGE DES RECOMMANDATIONS ======
-
-async function renderRecommendationsPage() {
-    appContainer.innerHTML = `
-        <h2>🎯 Recommandations pour vous</h2>
-        <p class="subtitle">Basées sur vos lectures et vos goûts</p>
-        
-        <div id="recommendationsContent">
-            <div class="spinner"></div>
-            <p>Analyse de vos préférences...</p>
-        </div>
-    `;
-    
-    loadRecommendations();
-}
-
-async function loadRecommendations() {
-    const recommendationsContent = document.getElementById('recommendationsContent');
-    if (!recommendationsContent) return;
-    
-    try {
-        const response = await callApi(`/recommendations/${currentUserId}?limit=10`, 'GET', null, true, true);
-        const recommendations = response.recommendations || [];
-        
-        if (recommendations.length === 0) {
-            recommendationsContent.innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-magic fa-3x"></i>
-                    <p>Pas encore assez de données pour générer des recommandations</p>
-                    <small>Empruntez et notez des livres pour obtenir des suggestions personnalisées !</small>
-                </div>
-            `;
-        } else {
-            let html = '<div class="recommendations-grid">';
-            
-            recommendations.forEach(book => {
-                html += `
-                    <div class="recommendation-card">
-                        <div class="recommendation-header">
-                            <h3>${escapeHtml(book.titre)}</h3>
-                            ${book.avg_rating ? `<span class="rating">⭐ ${book.avg_rating.toFixed(1)}</span>` : ''}
-                        </div>
-                        <p class="book-author">${escapeHtml(book.auteur)}</p>
-                        <p class="book-owner">Propriétaire: ${book.proprietaire}</p>
-                        <div class="recommendation-actions">
-                            <button onclick="editBookInModal(${book.id}, false)">
-                                <i class="fas fa-info-circle"></i> Voir détails
-                            </button>
-                        </div>
-                    </div>
-                `;
-            });
-            
-            html += '</div>';
-            recommendationsContent.innerHTML = html;
-        }
-    } catch (error) {
-        recommendationsContent.innerHTML = `
-            <div class="error-message">
-                <p>Erreur lors du chargement des recommandations</p>
-                <button onclick="loadRecommendations()">Réessayer</button>
-            </div>
-        `;
     }
 }
 
