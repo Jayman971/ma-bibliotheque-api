@@ -98,50 +98,51 @@
 
     <!-- ✅ MODALS ET OVERLAYS -->
     
-    <!-- Modal pour ajouter/modifier un livre -->
+    <!-- ✅ Modal pour ajouter/modifier un livre (Collection ET Wishlist) -->
     <div id="bookModal" class="modal" style="display: none;">
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="bookModalTitle">Ajouter un livre</h2>
-                <button class="modal-close" onclick="closeBookModal()">&times;</button>
+                <button class="modal-close" onclick="closeBookModal()" aria-label="Fermer">&times;</button>
             </div>
             <div class="modal-body">
-                <form id="bookForm">
+                <form id="bookForm" data-is-wishlist="false">
                     <input type="hidden" id="bookId" value="">
                     
+                    <!-- Champs communs (Collection ET Wishlist) -->
                     <div class="form-group">
                         <label for="bookTitre">Titre <span class="required">*</span></label>
-                        <input type="text" id="bookTitre" required autocomplete="off">
+                        <input type="text" id="bookTitre" required autocomplete="off" placeholder="Ex: Le Seigneur des Anneaux">
                     </div>
                     
                     <div class="form-group">
                         <label for="bookAuteur">Auteur <span class="required">*</span></label>
-                        <input type="text" id="bookAuteur" required autocomplete="off">
-                    </div>
-                    
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="bookNote">Note</label>
-                            <div class="star-rating" id="starRating">
-                                <i class="far fa-star" data-rating="1"></i>
-                                <i class="far fa-star" data-rating="2"></i>
-                                <i class="far fa-star" data-rating="3"></i>
-                                <i class="far fa-star" data-rating="4"></i>
-                                <i class="far fa-star" data-rating="5"></i>
-                            </div>
-                            <input type="hidden" id="bookNote" value="0">
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="bookProprietaire">Propriétaire</label>
-                            <select id="bookProprietaire">
-                                <option value="J">Jérémy</option>
-                                <option value="K">Kelly</option>
-                            </select>
-                        </div>
+                        <input type="text" id="bookAuteur" required autocomplete="off" placeholder="Ex: J.R.R. Tolkien">
                     </div>
                     
                     <div class="form-group">
+                        <label for="bookProprietaire">Propriétaire <span class="required">*</span></label>
+                        <select id="bookProprietaire">
+                            <option value="J">Jérémy</option>
+                            <option value="K">Kelly</option>
+                        </select>
+                    </div>
+                    
+                    <!-- ✅ Champs UNIQUEMENT pour la Collection (cachés en mode Wishlist) -->
+                    <div class="form-group collection-only" data-collection-field="note">
+                        <label for="bookNote">Note</label>
+                        <div class="star-rating" id="starRating">
+                            <i class="far fa-star" data-rating="1"></i>
+                            <i class="far fa-star" data-rating="2"></i>
+                            <i class="far fa-star" data-rating="3"></i>
+                            <i class="far fa-star" data-rating="4"></i>
+                            <i class="far fa-star" data-rating="5"></i>
+                        </div>
+                        <input type="hidden" id="bookNote" value="0">
+                        <small class="form-hint">Cliquez sur les étoiles pour noter</small>
+                    </div>
+                    
+                    <div class="form-group collection-only" data-collection-field="statut">
                         <label for="bookStatut">Statut de lecture</label>
                         <select id="bookStatut">
                             <option value="lu">Lu</option>
@@ -151,7 +152,9 @@
                     </div>
                     
                     <div class="modal-actions">
-                        <button type="button" class="btn btn-secondary" onclick="closeBookModal()">Annuler</button>
+                        <button type="button" class="btn btn-secondary" onclick="closeBookModal()">
+                            <i class="fas fa-times"></i> Annuler
+                        </button>
                         <button type="submit" class="btn btn-primary">
                             <i class="fas fa-save"></i> Enregistrer
                         </button>
@@ -166,7 +169,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="loanModalTitle">Nouveau prêt</h2>
-                <button class="modal-close" onclick="closeLoanModal()">&times;</button>
+                <button class="modal-close" onclick="closeLoanModal()" aria-label="Fermer">&times;</button>
             </div>
             <div class="modal-body">
                 <form id="loanForm">
@@ -194,7 +197,9 @@
                     </div>
                     
                     <div class="modal-actions">
-                        <button type="button" class="btn btn-secondary" onclick="closeLoanModal()">Annuler</button>
+                        <button type="button" class="btn btn-secondary" onclick="closeLoanModal()">
+                            <i class="fas fa-times"></i> Annuler
+                        </button>
                         <button type="submit" class="btn btn-primary">
                             <i class="fas fa-handshake"></i> Créer le prêt
                         </button>
@@ -209,22 +214,24 @@
         <div class="modal-content modal-small">
             <div class="modal-header">
                 <h2>Nouvel utilisateur</h2>
-                <button class="modal-close" onclick="closeUserModal()">&times;</button>
+                <button class="modal-close" onclick="closeUserModal()" aria-label="Fermer">&times;</button>
             </div>
             <div class="modal-body">
                 <form id="userForm">
                     <div class="form-group">
                         <label for="userName">Nom <span class="required">*</span></label>
-                        <input type="text" id="userName" required>
+                        <input type="text" id="userName" required placeholder="Ex: Marie Dupont">
                     </div>
                     
                     <div class="form-group">
                         <label for="userEmail">Email (optionnel)</label>
-                        <input type="email" id="userEmail">
+                        <input type="email" id="userEmail" placeholder="Ex: marie@example.com">
                     </div>
                     
                     <div class="modal-actions">
-                        <button type="button" class="btn btn-secondary" onclick="closeUserModal()">Annuler</button>
+                        <button type="button" class="btn btn-secondary" onclick="closeUserModal()">
+                            <i class="fas fa-times"></i> Annuler
+                        </button>
                         <button type="submit" class="btn btn-primary">
                             <i class="fas fa-user-plus"></i> Ajouter
                         </button>
@@ -239,12 +246,14 @@
         <div class="modal-content modal-small">
             <div class="modal-header">
                 <h2 id="confirmTitle">Confirmation</h2>
-                <button class="modal-close" onclick="closeConfirmModal()">&times;</button>
+                <button class="modal-close" onclick="closeConfirmModal()" aria-label="Fermer">&times;</button>
             </div>
             <div class="modal-body">
                 <p id="confirmMessage"></p>
                 <div class="modal-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeConfirmModal()">Annuler</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeConfirmModal()">
+                        <i class="fas fa-times"></i> Annuler
+                    </button>
                     <button type="button" id="confirmBtn" class="btn btn-danger">
                         <i class="fas fa-check"></i> Confirmer
                     </button>
@@ -278,7 +287,7 @@
     <script>
         // Initialiser le mode sombre depuis localStorage
         document.addEventListener('DOMContentLoaded', () => {
-            const savedTheme = localStorage.getItem('darkMode');
+            const savedTheme = localStorage.getItem('library_dark_mode');
             const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
             
             if (savedTheme === 'true' || (savedTheme === null && prefersDark)) {
@@ -295,7 +304,7 @@
             const isDark = document.body.classList.toggle('dark-mode');
             document.body.classList.toggle('light-mode');
             
-            localStorage.setItem('darkMode', isDark);
+            localStorage.setItem('library_dark_mode', isDark);
             updateDarkModeIcon(isDark);
             
             // Sauvegarder la préférence sur le serveur si connecté
@@ -324,6 +333,8 @@
             const icon = document.getElementById('apiStatusIcon');
             const text = document.getElementById('apiStatusText');
             const link = document.getElementById('apiStatusLink');
+            
+            if (!icon || !text || !link) return;
             
             try {
                 const controller = new AbortController();
@@ -369,9 +380,9 @@
         
         // ✅ Vérifier au chargement et périodiquement
         document.addEventListener('DOMContentLoaded', () => {
-            checkApiStatus();
+            setTimeout(checkApiStatus, 1000); // Délai initial
             setInterval(checkApiStatus, API_CONFIG.HEALTH_CHECK_INTERVAL);
-            updateFooterStats();
+            setTimeout(updateFooterStats, 1500); // Délai initial pour les stats
         });
         
         // ✅ Mettre à jour les stats du footer
@@ -384,73 +395,17 @@
                 if (typeof getQuickStats === 'function') {
                     const stats = await getQuickStats();
                     statsElement.textContent = `${stats.total || 0} livres • ${stats.loans || 0} prêts actifs`;
+                } else {
+                    statsElement.textContent = 'Stats chargement...';
                 }
             } catch (error) {
                 statsElement.textContent = 'Stats non disponibles';
+                console.warn('Erreur chargement stats footer:', error);
             }
         }
         
         // Mettre à jour les stats toutes les 5 minutes
         setInterval(updateFooterStats, 300000);
-    </script>
-    
-    <!-- ✅ Script pour les étoiles et la date d'échéance -->
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            // Système de notation par étoiles
-            const stars = document.querySelectorAll('#starRating i');
-            const noteInput = document.getElementById('bookNote');
-            
-            stars.forEach(star => {
-                star.addEventListener('click', () => {
-                    const rating = parseInt(star.getAttribute('data-rating'));
-                    noteInput.value = rating;
-                    updateStarDisplay(rating);
-                });
-                
-                star.addEventListener('mouseenter', () => {
-                    const rating = parseInt(star.getAttribute('data-rating'));
-                    updateStarDisplay(rating, true);
-                });
-            });
-            
-            document.getElementById('starRating')?.addEventListener('mouseleave', () => {
-                updateStarDisplay(parseInt(noteInput.value));
-            });
-            
-            // Calculer la date d'échéance
-            const loanDurationInput = document.getElementById('loanDuration');
-            if (loanDurationInput) {
-                loanDurationInput.addEventListener('input', updateCalculatedDueDate);
-            }
-        });
-        
-        function updateStarDisplay(rating, isHover = false) {
-            const stars = document.querySelectorAll('#starRating i');
-            stars.forEach((star, index) => {
-                if (index < rating) {
-                    star.className = 'fas fa-star';
-                } else {
-                    star.className = isHover ? 'far fa-star' : 'far fa-star';
-                }
-            });
-        }
-        
-        function updateCalculatedDueDate() {
-            const duration = parseInt(document.getElementById('loanDuration')?.value || 14);
-            const dueDate = new Date();
-            dueDate.setDate(dueDate.getDate() + duration);
-            
-            const dueDateElement = document.getElementById('calculatedDueDate');
-            if (dueDateElement) {
-                dueDateElement.textContent = dueDate.toLocaleDateString('fr-FR', {
-                    weekday: 'long',
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
-                });
-            }
-        }
     </script>
 </body>
 </html>

@@ -485,7 +485,14 @@ function renderNavigation() {
     document.getElementById('wishlistBtn').addEventListener('click', () => showPage('wishlist', { isWishlist: true }));
     document.getElementById('loansBtn').addEventListener('click', () => showPage('loans'));
     document.getElementById('usersBtn').addEventListener('click', () => showPage('users'));
-    document.getElementById('addBookBtn').addEventListener('click', () => openAddBookModal());
+    
+    // ✅ Rendre le bouton "Ajouter" intelligent selon la page active
+    document.getElementById('addBookBtn').addEventListener('click', () => {
+        const activeBtn = document.querySelector('#mainNav .active');
+        const isWishlistPage = activeBtn?.id === 'wishlistBtn';
+        openAddBookModal(isWishlistPage);
+    });
+    
     document.getElementById('logoutBtn').addEventListener('click', logout);
     
     // Vérifier les prêts en retard
@@ -1163,6 +1170,8 @@ async function openAddBookModal(isWishlist = false) {
     const bookForm = document.getElementById('bookForm');
     if (bookForm) {
         bookForm.reset();
+        // ✅ Stocker le mode wishlist dans un attribut data
+        bookForm.dataset.isWishlist = isWishlist;
     }
     
     const bookIdInput = document.getElementById('bookId');
@@ -1170,10 +1179,27 @@ async function openAddBookModal(isWishlist = false) {
     const bookNoteInput = document.getElementById('bookNote');
     const bookStatut = document.getElementById('bookStatut');
     
+    // ✅ Cacher les champs note et statut si c'est la wishlist
+    const noteField = bookNoteInput?.closest('div');
+    const statutField = bookStatut?.closest('div');
+    const starRatingDiv = document.getElementById('starRating')?.closest('div');
+    
+    if (isWishlist) {
+        if (noteField) noteField.style.display = 'none';
+        if (statutField) statutField.style.display = 'none';
+        if (starRatingDiv) starRatingDiv.style.display = 'none';
+    } else {
+        if (noteField) noteField.style.display = 'block';
+        if (statutField) statutField.style.display = 'block';
+        if (starRatingDiv) starRatingDiv.style.display = 'block';
+    }
+    
     if (bookIdInput) bookIdInput.value = '';
-    if (bookModalTitle) bookModalTitle.textContent = 'Ajouter un nouveau livre';
+    if (bookModalTitle) bookModalTitle.textContent = isWishlist 
+        ? '💖 Ajouter à la Wishlist' 
+        : '📚 Ajouter un nouveau livre';
     if (bookNoteInput) bookNoteInput.value = '0';
-    if (bookStatut) bookStatut.value = isWishlist ? 'a_lire' : 'lu';
+    if (bookStatut) bookStatut.value = 'lu';
     
     // Réinitialiser l'affichage des étoiles
     updateStarDisplay(0);
@@ -1187,6 +1213,7 @@ async function editBookInModal(bookId, isWishlist = false) {
     try {
         const book = await callApi(isWishlist ? `/wishlist/${bookId}` : `/books/${bookId}`);
         
+        const bookForm = document.getElementById('bookForm');
         const bookModalTitle = document.getElementById('bookModalTitle');
         const bookIdInput = document.getElementById('bookId');
         const bookTitreInput = document.getElementById('bookTitre');
@@ -1195,7 +1222,29 @@ async function editBookInModal(bookId, isWishlist = false) {
         const bookProprietaireSelect = document.getElementById('bookProprietaire');
         const bookStatutSelect = document.getElementById('bookStatut');
         
-        if (bookModalTitle) bookModalTitle.textContent = `Modifier : "${book.titre}"`;
+        // ✅ Stocker le mode wishlist
+        if (bookForm) {
+            bookForm.dataset.isWishlist = isWishlist;
+        }
+        
+        // ✅ Cacher les champs note et statut si c'est la wishlist
+        const noteField = bookNoteInput?.closest('div');
+        const statutField = bookStatutSelect?.closest('div');
+        const starRatingDiv = document.getElementById('starRating')?.closest('div');
+        
+        if (isWishlist) {
+            if (noteField) noteField.style.display = 'none';
+            if (statutField) statutField.style.display = 'none';
+            if (starRatingDiv) starRatingDiv.style.display = 'none';
+        } else {
+            if (noteField) noteField.style.display = 'block';
+            if (statutField) statutField.style.display = 'block';
+            if (starRatingDiv) starRatingDiv.style.display = 'block';
+        }
+        
+        if (bookModalTitle) bookModalTitle.textContent = isWishlist 
+            ? `💖 Modifier dans la Wishlist : "${book.titre}"`
+            : `📚 Modifier : "${book.titre}"`;
         if (bookIdInput) bookIdInput.value = book.id;
         if (bookTitreInput) bookTitreInput.value = book.titre;
         if (bookAuteurInput) bookAuteurInput.value = book.auteur;
@@ -1246,6 +1295,7 @@ function updateCalculatedDueDate() {
 async function handleBookFormSubmit(e) {
     e.preventDefault();
     
+    const bookForm = document.getElementById('bookForm');
     const bookIdInput = document.getElementById('bookId');
     const bookTitreInput = document.getElementById('bookTitre');
     const bookAuteurInput = document.getElementById('bookAuteur');
@@ -1261,32 +1311,50 @@ async function handleBookFormSubmit(e) {
     const bookId = bookIdInput ? bookIdInput.value : '';
     const isEditing = !!bookId;
     
+    // ✅ Récupérer le mode wishlist depuis le formulaire
+    const isWishlist = bookForm?.dataset.isWishlist === 'true';
+    
+    console.log('📝 Soumission formulaire:', { isEditing, isWishlist, bookId });
+    
+    // ✅ Créer l'objet bookData selon le mode
     const bookData = {
         titre: bookTitreInput.value.trim(),
         auteur: bookAuteurInput.value.trim(),
-        proprietaire: bookProprietaireSelect ? bookProprietaireSelect.value : 'J',
-        note: bookNoteInput ? parseInt(bookNoteInput.value) || 0 : 0,
-        statut_lecture: bookStatutSelect ? bookStatutSelect.value : 'lu'
+        proprietaire: bookProprietaireSelect ? bookProprietaireSelect.value : 'J'
     };
+    
+    // ✅ Ajouter note et statut UNIQUEMENT si ce n'est pas la wishlist
+    if (!isWishlist) {
+        bookData.note = bookNoteInput ? parseInt(bookNoteInput.value) || 0 : 0;
+        bookData.statut_lecture = bookStatutSelect ? bookStatutSelect.value : 'lu';
+    }
     
     showLoader(isEditing ? 'Modification en cours...' : 'Ajout en cours...');
     
     try {
         if (isEditing) {
-            await callApi(`/books/${bookId}`, 'PUT', bookData);
+            // ✅ Utiliser le bon endpoint pour la modification
+            const endpoint = isWishlist ? `/wishlist/${bookId}` : `/books/${bookId}`;
+            await callApi(endpoint, 'PUT', bookData);
             showToast('✅ Livre modifié avec succès !', 'success');
         } else {
-            await callApi('/books', 'POST', bookData);
-            showToast('✅ Livre ajouté avec succès !', 'success');
+            // ✅ Utiliser le bon endpoint pour l'ajout
+            const endpoint = isWishlist ? '/wishlist' : '/books';
+            await callApi(endpoint, 'POST', bookData);
+            showToast(`✅ Livre ajouté ${isWishlist ? 'à la wishlist' : 'à la collection'} avec succès !`, 'success');
         }
         
         clearCache();
         closeBookModal();
         hideLoader();
         
-        // Rafraîchir la page actuelle
+        // ✅ Rafraîchir la bonne page
         setTimeout(() => {
-            showPage('collection', { isWishlist: false });
+            if (isWishlist) {
+                showPage('wishlist', { isWishlist: true });
+            } else {
+                showPage('collection', { isWishlist: false });
+            }
         }, 300);
     } catch (error) {
         hideLoader();

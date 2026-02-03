@@ -1,6 +1,6 @@
 /* ========================================
    BIBLIOTHÈQUE - STYLES PRINCIPAUX
-   Version avec Mode Sombre, Modals, Tags, Prêts, etc.
+   Version avec Mode Sombre, Modals, Tags, Prêts, Wishlist
    ======================================== */
 
 :root {
@@ -73,6 +73,13 @@ body.dark-mode textarea {
     background-color: var(--bg-secondary);
     color: var(--text-primary);
     border-color: var(--border-color);
+}
+
+body.dark-mode input::placeholder,
+body.dark-mode select::placeholder,
+body.dark-mode textarea::placeholder {
+    color: var(--text-secondary);
+    opacity: 0.7;
 }
 
 body.dark-mode .book-form-container {
@@ -359,6 +366,20 @@ nav button.active {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 20px;
+}
+
+/* ✅ Styles pour les champs Collection uniquement (cachés en mode Wishlist) */
+.collection-only {
+    transition: opacity 0.3s ease, max-height 0.3s ease, margin 0.3s ease;
+}
+
+/* Quand on cache les champs collection-only, on utilise cette classe depuis JS */
+.collection-only[style*="display: none"] {
+    opacity: 0;
+    max-height: 0;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
 }
 
 /* ========================================
@@ -665,6 +686,7 @@ body.dark-mode .autocomplete-item:hover {
     gap: 5px;
     font-size: 1.8em;
     cursor: pointer;
+    margin-bottom: 8px;
 }
 
 .star-rating i {
@@ -679,6 +701,10 @@ body.dark-mode .autocomplete-item:hover {
 
 .star-rating i.far {
     color: #ddd;
+}
+
+body.dark-mode .star-rating i.far {
+    color: #444;
 }
 
 /* ========================================
@@ -855,6 +881,10 @@ body.dark-mode .autocomplete-item:hover {
     color: var(--text-secondary);
     font-style: italic;
     margin: 0;
+    padding: 10px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    border-left: 3px solid var(--color-info);
 }
 
 .btn-loan {
@@ -1064,6 +1094,10 @@ body.dark-mode .autocomplete-item:hover {
     text-align: center;
     box-shadow: 0 10px 40px rgba(0,0,0,0.3);
     min-width: 250px;
+}
+
+body.dark-mode .loader-content {
+    background: var(--bg-primary);
 }
 
 .loader-text {
@@ -1586,12 +1620,28 @@ body.dark-mode .autocomplete-item:hover {
     margin-left: 3px;
 }
 
+/* ✅ Styles pour les hints */
+.form-hint {
+    display: block;
+    margin-top: 5px;
+    font-size: 0.85em;
+    color: var(--text-secondary);
+    font-style: italic;
+    opacity: 0.8;
+}
+
 .book-form-container input[type="text"],
 .book-form-container input[type="number"],
 .book-form-container input[type="url"],
 .book-form-container input[type="email"],
 .book-form-container select,
-.book-form-container textarea {
+.book-form-container textarea,
+.modal-body input[type="text"],
+.modal-body input[type="number"],
+.modal-body input[type="url"],
+.modal-body input[type="email"],
+.modal-body select,
+.modal-body textarea {
     width: 100%;
     padding: 12px;
     border: 1px solid var(--border-color);
@@ -1603,9 +1653,22 @@ body.dark-mode .autocomplete-item:hover {
     transition: border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
+/* ✅ Styles pour les placeholders */
+.book-form-container input::placeholder,
+.book-form-container textarea::placeholder,
+.modal-body input::placeholder,
+.modal-body textarea::placeholder {
+    color: var(--text-secondary);
+    opacity: 0.6;
+    font-style: italic;
+}
+
 .book-form-container input:focus,
 .book-form-container select:focus,
-.book-form-container textarea:focus {
+.book-form-container textarea:focus,
+.modal-body input:focus,
+.modal-body select:focus,
+.modal-body textarea:focus {
     border-color: var(--color-secondary);
     outline: none;
     box-shadow: 0 0 0 3px rgba(74, 116, 243, 0.1);
@@ -2070,6 +2133,10 @@ footer .separator {
     .book-form-container,
     .modal-content {
         padding: 25px;
+    }
+    
+    .modal-body {
+        padding: 20px;
     }
     
     .form-actions,
